@@ -11,23 +11,23 @@ import (
 
 // mockWorkerPersistence is a mock implementation of WorkerPersistenceAdapter
 type mockWorkerPersistence struct {
-	mu                        sync.Mutex
-	workers                   map[string]*workerRecord
-	currentGeneration         int64
-	registerErr               error
-	updateHeartbeatErr        error
-	updateStateErr            error
-	getCurrentGenerationErr   error
-	deleteStaleWorkersErr     error
-	heartbeatCallCount        int
+	mu                          sync.Mutex
+	workers                     map[string]*workerRecord
+	currentGeneration           int64
+	registerErr                 error
+	updateHeartbeatErr          error
+	updateStateErr              error
+	getCurrentGenerationErr     error
+	deleteStaleWorkersErr       error
+	heartbeatCallCount          int
 	deleteStaleWorkersCallCount int
 }
 
 type workerRecord struct {
-	id             string
-	generation     int64
-	state          WorkerState
-	lastHeartbeat  time.Time
+	id            string
+	generation    int64
+	state         WorkerState
+	lastHeartbeat time.Time
 }
 
 func newMockWorkerPersistence() *mockWorkerPersistence {
