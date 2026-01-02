@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +22,56 @@ func (m *mockTestProjection) Name() string {
 //nolint:gocritic // hugeParam: Intentionally pass by value to enforce immutability
 func (m *mockTestProjection) Handle(_ context.Context, _ es.PersistedEvent) error {
 	return nil
+}
+
+// mockRecreatePersistence is a mock implementation of RecreatePersistenceAdapter
+type mockRecreatePersistence struct {
+	mu                   sync.Mutex
+	currentGeneration    int64
+	advanceErr           error
+	getCurrentErr        error
+	advanceCallCount     int
+	expectedCurrentOnCAS int64 // for simulating CAS failure
+}
+
+func newMockRecreatePersistence() *mockRecreatePersistence {
+	return &mockRecreatePersistence{
+		currentGeneration: 0,
+	}
+}
+
+func (m *mockRecreatePersistence) GetCurrentGeneration(ctx context.Context) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.getCurrentErr != nil {
+		return 0, m.getCurrentErr
+	}
+
+	return m.currentGeneration, nil
+}
+
+func (m *mockRecreatePersistence) AdvanceGeneration(ctx context.Context, expectedCurrent int64) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.advanceCallCount++
+
+	if m.advanceErr != nil {
+		return 0, m.advanceErr
+	}
+
+	// Simulate CAS behavior - if expected doesn't match current, fail
+	if m.expectedCurrentOnCAS > 0 && expectedCurrent != m.expectedCurrentOnCAS {
+		return 0, errors.New("CAS failed: generation mismatch")
+	}
+
+	if expectedCurrent != m.currentGeneration {
+		return 0, errors.New("CAS failed: generation mismatch")
+	}
+
+	m.currentGeneration++
+	return m.currentGeneration, nil
 }
 
 func TestRecreate_Constructor(t *testing.T) {
@@ -308,3 +359,132 @@ func TestRecreateStrategy_WithoutWorker_WorksNormally(t *testing.T) {
 		t.Fatal("Run did not complete in time")
 	}
 }
+
+func TestRecreateStrategy_WithGeneration_AdvancesGeneration(t *testing.T) {
+recreatePersistence := newMockRecreatePersistence()
+
+strategy := &RecreateStrategy{
+RecreatePersistence: recreatePersistence,
+}
+
+proj := &mockTestProjection{name: "test"}
+projections := []Projection{proj}
+
+ctx, cancel := context.WithCancel(context.Background())
+
+done := make(chan error, 1)
+go func() {
+done <- strategy.Run(ctx, projections)
+}()
+
+// Give strategy time to advance generation
+time.Sleep(50 * time.Millisecond)
+
+// Check that generation was advanced
+recreatePersistence.mu.Lock()
+currentGen := recreatePersistence.currentGeneration
+advanceCalls := recreatePersistence.advanceCallCount
+recreatePersistence.mu.Unlock()
+
+if currentGen != 1 {
+t.Errorf("Expected generation to be 1, got: %d", currentGen)
+}
+
+if advanceCalls != 1 {
+t.Errorf("Expected AdvanceGeneration to be called once, got: %d", advanceCalls)
+}
+
+cancel()
+
+select {
+case <-done:
+case <-time.After(1 * time.Second):
+t.Fatal("Run did not complete in time")
+}
+}
+
+func TestRecreateStrategy_WithGeneration_FailsOnCASConflict(t *testing.T) {
+recreatePersistence := newMockRecreatePersistence()
+
+// Simulate race condition: set mock to expect different generation
+recreatePersistence.mu.Lock()
+recreatePersistence.currentGeneration = 5
+recreatePersistence.expectedCurrentOnCAS = 3 // Force CAS to fail
+recreatePersistence.mu.Unlock()
+
+strategy := &RecreateStrategy{
+RecreatePersistence: recreatePersistence,
+}
+
+proj := &mockTestProjection{name: "test"}
+projections := []Projection{proj}
+
+ctx := context.Background()
+
+err := strategy.Run(ctx, projections)
+
+// Should fail because CAS will fail (expected 3 but got 5)
+if err == nil {
+t.Fatal("Expected error from CAS conflict, got nil")
+}
+}
+
+func TestRecreateStrategy_WithGenerationAndWorker_UpdatesWorkerGeneration(t *testing.T) {
+recreatePersistence := newMockRecreatePersistence()
+workerPersistence := newMockWorkerPersistence()
+
+workerConfig := WorkerConfig{
+HeartbeatInterval:  100 * time.Millisecond,
+PersistenceAdapter: workerPersistence,
+}
+
+strategy := &RecreateStrategy{
+RecreatePersistence:  recreatePersistence,
+WorkerConfig:         workerConfig,
+StaleWorkerThreshold: 30 * time.Second,
+}
+
+proj := &mockTestProjection{name: "test"}
+projections := []Projection{proj}
+
+ctx, cancel := context.WithCancel(context.Background())
+
+done := make(chan error, 1)
+go func() {
+done <- strategy.Run(ctx, projections)
+}()
+
+// Give strategy time to start and advance generation
+time.Sleep(150 * time.Millisecond)
+
+// Check that generation was advanced
+recreatePersistence.mu.Lock()
+currentGen := recreatePersistence.currentGeneration
+recreatePersistence.mu.Unlock()
+
+if currentGen != 1 {
+t.Errorf("Expected generation to be 1, got: %d", currentGen)
+}
+
+// Check that worker sees the new generation
+workerPersistence.mu.Lock()
+var workerGen int64
+for _, record := range workerPersistence.workers {
+workerGen = record.generation
+break
+}
+workerPersistence.mu.Unlock()
+
+if workerGen != 1 {
+t.Errorf("Expected worker generation to be 1, got: %d", workerGen)
+}
+
+cancel()
+
+select {
+case <-done:
+case <-time.After(2 * time.Second):
+t.Fatal("Run did not complete in time")
+}
+}
+
