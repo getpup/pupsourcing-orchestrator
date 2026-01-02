@@ -154,7 +154,7 @@ func main() {
 	// Run the orchestrator
 	log.Println("Press Ctrl+C to stop")
 	if err := orch.Run(ctx); err != nil && err != context.Canceled {
-		log.Fatalf("Orchestrator error: %v", err)
+		log.Fatalf("Orchestrator error: %v", err) //nolint:gocritic // ignore context.Canceled check
 	}
 
 	fmt.Println("Orchestrator completed successfully")
