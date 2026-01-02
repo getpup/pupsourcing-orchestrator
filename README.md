@@ -182,13 +182,27 @@ The Recreate strategy is a simple orchestration approach where all projections a
 // Basic usage without worker management
 strategy := orchestrator.Recreate()
 
-// With worker lifecycle management
-persistence := &MyWorkerPersistence{} // Implement WorkerPersistenceAdapter
+// With worker lifecycle management and database coordination
+db, err := sql.Open("postgres", "postgres://...") // Your database connection
+if err != nil {
+    log.Fatalf("Failed to connect to database: %v", err)
+}
+
+// Create worker persistence adapter using the provided SQL implementation
+workerPersistence, err := orchestrator.NewSQLWorkerPersistence(orchestrator.SQLWorkerPersistenceConfig{
+    DB:                db,
+    SchemaName:        "orchestrator",      // Database schema/database name
+    WorkersTable:      "workers",           // Workers table name
+    RecreateLockTable: "recreate_lock",     // Recreate lock table name
+})
+if err != nil {
+    log.Fatalf("Failed to create worker persistence: %v", err)
+}
 
 strategy := &orchestrator.RecreateStrategy{
     WorkerConfig: orchestrator.WorkerConfig{
         HeartbeatInterval:  5 * time.Second,
-        PersistenceAdapter: persistence,
+        PersistenceAdapter: workerPersistence,
     },
     StaleWorkerThreshold: 30 * time.Second,
     Logger:               myLogger, // Optional: inject es.Logger for observability
@@ -244,6 +258,100 @@ type WorkerPersistenceAdapter interface {
     DeleteStaleWorkers(ctx context.Context, staleThreshold time.Duration) error
 }
 ```
+
+**SQL Persistence Implementation:**
+
+The orchestrator provides `SQLWorkerPersistence` as a ready-to-use implementation:
+
+```go
+import (
+    "database/sql"
+    _ "github.com/lib/pq" // PostgreSQL driver
+)
+
+db, err := sql.Open("postgres", "postgres://localhost/mydb?sslmode=disable")
+if err != nil {
+    log.Fatal(err)
+}
+
+workerPersistence, err := orchestrator.NewSQLWorkerPersistence(orchestrator.SQLWorkerPersistenceConfig{
+    DB:                db,
+    SchemaName:        "orchestrator",
+    WorkersTable:      "workers",
+    RecreateLockTable: "recreate_lock",
+})
+```
+
+### Protocol Coordinator
+
+**Integration with Orchestrator:**
+
+The protocol coordinator is designed for advanced use cases where you need to manually control the recreate cycle phases. The basic `orchestrator.Recreate()` strategy handles worker lifecycle automatically, but if you're building custom deployment tooling or need fine-grained control over the coordination protocol, you can use the `ProtocolCoordinator` directly.
+
+**Basic Orchestrator Usage (Recommended for most cases):**
+
+```go
+// Simple usage - the RecreateStrategy handles protocol coordination internally
+strategy := orchestrator.Recreate()
+
+orch, err := orchestrator.New(
+    orchestrator.WithStrategy(strategy),
+    orchestrator.WithProjections(p1, p2, p3),
+)
+
+// Just run the orchestrator - it handles everything
+orch.Run(ctx)
+```
+
+**Advanced Usage - Manual Protocol Control:**
+
+For deployment orchestration, CI/CD pipelines, or custom coordination logic:
+
+```go
+// Create protocol persistence
+protocolPersistence, err := orchestrator.NewSQLProtocolPersistence(orchestrator.SQLPersistenceConfig{
+    DB:                    db,
+    SchemaName:            "orchestrator",
+    RecreateLockTable:     "recreate_lock",
+    ProjectionShardsTable: "projection_shards",
+    WorkersTable:          "workers",
+})
+
+// Create protocol coordinator
+coordinator, err := orchestrator.NewProtocolCoordinator(protocolPersistence)
+
+// Manual control of recreate cycle phases:
+// 1. Start recreate (idle → draining)
+generation, err := coordinator.StartRecreate(ctx)
+
+// 2. Wait for all workers to drain
+for {
+    transitioned, err := coordinator.TryTransitionToAssigning(ctx)
+    if transitioned {
+        break // All workers are ready
+    }
+    time.Sleep(1 * time.Second)
+}
+
+// 3. Assign shards to workers (draining → assigning → running)
+err = coordinator.PerformShardAssignment(ctx)
+err = coordinator.TransitionToRunning(ctx)
+
+// 4. Complete cycle (running → idle)
+err = coordinator.TransitionToIdle(ctx)
+```
+
+**When to use ProtocolCoordinator directly:**
+- Building deployment orchestration tools
+- Implementing custom blue-green or canary deployments
+- Coordinating across multiple orchestrator clusters
+- Custom monitoring or observability requirements
+- CI/CD pipeline integration with specific phase control
+
+**When to use RecreateStrategy (recommended):**
+- Standard application deployment
+- Single orchestrator instance managing workers
+- Default worker lifecycle management is sufficient
 
 ### Projection Interface
 
