@@ -125,7 +125,9 @@ func (s *SQLProtocolPersistence) IncrementGeneration(ctx context.Context) (int64
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback() // Rollback is safe to call even after Commit
+	}()
 
 	// Get current state
 	selectQuery := fmt.Sprintf("SELECT generation, phase FROM %s.%s WHERE lock_id = 1 FOR UPDATE",
@@ -226,7 +228,9 @@ func (s *SQLProtocolPersistence) AssignShardsToWorker(ctx context.Context, proje
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback() // Rollback is safe to call even after Commit
+	}()
 
 	updateQuery := fmt.Sprintf(
 		"UPDATE %s.%s SET owner_id = $1, state = 'assigned', updated_at = $2 WHERE projection_name = $3 AND shard_id = $4",
@@ -257,7 +261,9 @@ func (s *SQLProtocolPersistence) GetAllProjectionNames(ctx context.Context) ([]s
 	if err != nil {
 		return nil, fmt.Errorf("failed to query projection names: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Best effort close
+	}()
 
 	var names []string
 	for rows.Next() {
@@ -285,7 +291,9 @@ func (s *SQLProtocolPersistence) GetActiveWorkerIDs(ctx context.Context) ([]stri
 	if err != nil {
 		return nil, fmt.Errorf("failed to query active workers: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Best effort close
+	}()
 
 	var workerIDs []string
 	for rows.Next() {
