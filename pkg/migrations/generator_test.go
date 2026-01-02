@@ -461,3 +461,159 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected OutputFilename to end with '_init_orchestrator_coordination.sql', got '%s'", config.OutputFilename)
 	}
 }
+
+func TestValidateIdentifier(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		fieldName string
+		wantError bool
+	}{
+		{"valid simple", "table_name", "TableName", false},
+		{"valid with numbers", "table123", "TableName", false},
+		{"valid with underscores", "my_table_name", "TableName", false},
+		{"empty string", "", "TableName", true},
+		{"starts with number", "123table", "TableName", true},
+		{"contains spaces", "table name", "TableName", true},
+		{"contains dash", "table-name", "TableName", true},
+		{"contains semicolon", "table;DROP TABLE users", "TableName", true},
+		{"contains quotes", "table'name", "TableName", true},
+		{"sql injection attempt", "table; DROP TABLE users--", "TableName", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateIdentifier(tt.value, tt.fieldName)
+			if tt.wantError && err == nil {
+				t.Errorf("Expected error for value '%s', got nil", tt.value)
+			}
+			if !tt.wantError && err != nil {
+				t.Errorf("Expected no error for value '%s', got: %v", tt.value, err)
+			}
+		})
+	}
+}
+
+func TestValidateConfig(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    Config
+		wantError bool
+	}{
+		{
+			name: "valid config",
+			config: Config{
+				SchemaName:            "orchestrator",
+				ProjectionShardsTable: "projection_shards",
+				RecreateLockTable:     "recreate_lock",
+				WorkersTable:          "workers",
+			},
+			wantError: false,
+		},
+		{
+			name: "invalid schema name",
+			config: Config{
+				SchemaName:            "schema; DROP TABLE users--",
+				ProjectionShardsTable: "projection_shards",
+				RecreateLockTable:     "recreate_lock",
+				WorkersTable:          "workers",
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid projection shards table",
+			config: Config{
+				SchemaName:            "orchestrator",
+				ProjectionShardsTable: "table'; DROP TABLE users--",
+				RecreateLockTable:     "recreate_lock",
+				WorkersTable:          "workers",
+			},
+			wantError: true,
+		},
+		{
+			name: "empty schema name",
+			config: Config{
+				SchemaName:            "",
+				ProjectionShardsTable: "projection_shards",
+				RecreateLockTable:     "recreate_lock",
+				WorkersTable:          "workers",
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateConfig(&tt.config)
+			if tt.wantError && err == nil {
+				t.Error("Expected error, got nil")
+			}
+			if !tt.wantError && err != nil {
+				t.Errorf("Expected no error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestGeneratePostgres_InvalidConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	config := Config{
+		OutputFolder:          tmpDir,
+		OutputFilename:        "test.sql",
+		SchemaName:            "schema'; DROP TABLE users--",
+		ProjectionShardsTable: "projection_shards",
+		RecreateLockTable:     "recreate_lock",
+		WorkersTable:          "workers",
+	}
+
+	err := GeneratePostgres(&config)
+	if err == nil {
+		t.Fatal("Expected error for invalid schema name, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid configuration") {
+		t.Errorf("Expected error to mention 'invalid configuration', got: %v", err)
+	}
+}
+
+func TestGenerateMySQL_InvalidConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	config := Config{
+		OutputFolder:          tmpDir,
+		OutputFilename:        "test.sql",
+		SchemaName:            "orchestrator",
+		ProjectionShardsTable: "table'; DROP TABLE users--",
+		RecreateLockTable:     "recreate_lock",
+		WorkersTable:          "workers",
+	}
+
+	err := GenerateMySQL(&config)
+	if err == nil {
+		t.Fatal("Expected error for invalid table name, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid configuration") {
+		t.Errorf("Expected error to mention 'invalid configuration', got: %v", err)
+	}
+}
+
+func TestGenerateSQLite_InvalidConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	config := Config{
+		OutputFolder:          tmpDir,
+		OutputFilename:        "test.sql",
+		SchemaName:            "orchestrator",
+		ProjectionShardsTable: "projection_shards",
+		RecreateLockTable:     "recreate_lock",
+		WorkersTable:          "workers'; DROP TABLE users--",
+	}
+
+	err := GenerateSQLite(&config)
+	if err == nil {
+		t.Fatal("Expected error for invalid workers table name, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid configuration") {
+		t.Errorf("Expected error to mention 'invalid configuration', got: %v", err)
+	}
+}

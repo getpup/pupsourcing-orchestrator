@@ -4,8 +4,40 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 )
+
+var identifierRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*$`)
+
+// validateIdentifier ensures an identifier contains only safe characters for SQL.
+// Returns an error if the identifier contains characters that could be used for SQL injection.
+func validateIdentifier(name, fieldName string) error {
+	if name == "" {
+		return fmt.Errorf("%s cannot be empty", fieldName)
+	}
+	if !identifierRegex.MatchString(name) {
+		return fmt.Errorf("%s must start with a letter and contain only letters, numbers, and underscores (got: %s)", fieldName, name)
+	}
+	return nil
+}
+
+// validateConfig validates all configuration values to prevent SQL injection.
+func validateConfig(config *Config) error {
+	if err := validateIdentifier(config.SchemaName, "SchemaName"); err != nil {
+		return err
+	}
+	if err := validateIdentifier(config.ProjectionShardsTable, "ProjectionShardsTable"); err != nil {
+		return err
+	}
+	if err := validateIdentifier(config.RecreateLockTable, "RecreateLockTable"); err != nil {
+		return err
+	}
+	if err := validateIdentifier(config.WorkersTable, "WorkersTable"); err != nil {
+		return err
+	}
+	return nil
+}
 
 // Config configures migration generation for orchestrator coordination tables.
 type Config struct {
@@ -16,7 +48,7 @@ type Config struct {
 	OutputFilename string
 
 	// SchemaName is the database schema name (PostgreSQL) or database name prefix (MySQL)
-	// For SQLite, this is ignored as SQLite doesn't support schemas
+	// For SQLite, table name prefixes are used instead of schemas (e.g., orchestrator_table_name)
 	SchemaName string
 
 	// ProjectionShardsTable is the name of the projection shards coordination table
@@ -44,6 +76,11 @@ func DefaultConfig() Config {
 
 // GeneratePostgres generates a PostgreSQL migration file.
 func GeneratePostgres(config *Config) error {
+	// Validate configuration to prevent SQL injection
+	if err := validateConfig(config); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	// Ensure output folder exists
 	if err := os.MkdirAll(config.OutputFolder, 0o755); err != nil {
 		return fmt.Errorf("failed to create output folder: %w", err)
@@ -157,6 +194,11 @@ CREATE INDEX IF NOT EXISTS idx_%s_generation
 
 // GenerateMySQL generates a MySQL/MariaDB migration file.
 func GenerateMySQL(config *Config) error {
+	// Validate configuration to prevent SQL injection
+	if err := validateConfig(config); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	// Ensure output folder exists
 	if err := os.MkdirAll(config.OutputFolder, 0o755); err != nil {
 		return fmt.Errorf("failed to create output folder: %w", err)
@@ -279,6 +321,11 @@ CREATE INDEX idx_%s_generation
 
 // GenerateSQLite generates a SQLite migration file.
 func GenerateSQLite(config *Config) error {
+	// Validate configuration to prevent SQL injection
+	if err := validateConfig(config); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	// Ensure output folder exists
 	if err := os.MkdirAll(config.OutputFolder, 0o755); err != nil {
 		return fmt.Errorf("failed to create output folder: %w", err)
