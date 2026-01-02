@@ -138,7 +138,7 @@ func TestRecreateStrategy_WithWorker_RegistersAndManagesLifecycle(t *testing.T) 
 	}
 
 	strategy := &RecreateStrategy{
-		WorkerConfig:         &workerConfig,
+		WorkerConfig:         workerConfig,
 		StaleWorkerThreshold: 100 * time.Millisecond,
 	}
 
@@ -228,7 +228,7 @@ func TestRecreateStrategy_WithWorker_CleansUpStaleWorkers(t *testing.T) {
 	}
 
 	strategy := &RecreateStrategy{
-		WorkerConfig:         &workerConfig,
+		WorkerConfig:         workerConfig,
 		StaleWorkerThreshold: 30 * time.Second,
 	}
 

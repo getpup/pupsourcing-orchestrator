@@ -2,8 +2,9 @@ package orchestrator
 
 import (
 	"context"
-	"log"
 	"time"
+
+	"github.com/getpup/pupsourcing/es"
 )
 
 // RecreateStrategy implements a simple orchestration strategy where all projections
@@ -21,25 +22,31 @@ import (
 type RecreateStrategy struct {
 	// WorkerConfig configures worker behavior (optional)
 	// If not provided, worker management is disabled
-	WorkerConfig *WorkerConfig
+	WorkerConfig WorkerConfig
 
 	// StaleWorkerThreshold is the duration after which a worker is considered stale
 	// Default is 30 seconds
 	StaleWorkerThreshold time.Duration
+
+	// Logger is an optional logger for observability
+	// If nil, logging is disabled
+	Logger es.Logger
 }
 
 // Run executes all projections sequentially until the context is canceled.
 // In the Recreate strategy, projections run in a simple sequential manner.
 // When the context is canceled, all projections are stopped gracefully.
 func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) error {
-	log.Printf("Starting Recreate strategy with %d projection(s)", len(projections))
+	if s.Logger != nil {
+		s.Logger.Info(ctx, "Starting Recreate strategy", "projection_count", len(projections))
+	}
 
 	var worker *Worker
 
-	// Initialize worker if config is provided
-	if s.WorkerConfig != nil {
+	// Initialize worker if config is provided and has a valid adapter
+	if s.WorkerConfig.PersistenceAdapter != nil {
 		var err error
-		worker, err = NewWorker(*s.WorkerConfig)
+		worker, err = NewWorker(s.WorkerConfig)
 		if err != nil {
 			return err
 		}
@@ -49,7 +56,9 @@ func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) er
 			return err
 		}
 
-		log.Printf("Worker registered: %s", worker.ID())
+		if s.Logger != nil {
+			s.Logger.Info(ctx, "Worker registered", "worker_id", worker.ID())
+		}
 
 		// Cleanup stale workers from previous deployments
 		staleThreshold := s.StaleWorkerThreshold
@@ -58,7 +67,9 @@ func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) er
 		}
 
 		if err := CleanupStaleWorkers(ctx, s.WorkerConfig.PersistenceAdapter, staleThreshold); err != nil {
-			log.Printf("Warning: failed to cleanup stale workers: %v", err)
+			if s.Logger != nil {
+				s.Logger.Error(ctx, "Failed to cleanup stale workers", "error", err)
+			}
 			// Don't fail the strategy if cleanup fails - log and continue
 		}
 
@@ -73,7 +84,9 @@ func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) er
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), DefaultCleanupTimeout)
 				defer cancel()
 				if err := worker.Stop(cleanupCtx); err != nil {
-					log.Printf("Warning: failed to stop worker cleanly: %v", err)
+					if s.Logger != nil {
+						s.Logger.Error(cleanupCtx, "Failed to stop worker cleanly", "error", err)
+					}
 				}
 			}
 		}()
@@ -92,7 +105,9 @@ func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) er
 	// and actually run the projections using the ProcessorRunner interface.
 
 	for _, proj := range projections {
-		log.Printf("Projection registered: %s", proj.Name())
+		if s.Logger != nil {
+			s.Logger.Info(ctx, "Projection registered", "projection_name", proj.Name())
+		}
 	}
 
 	// Transition to running state if worker is active
@@ -110,11 +125,15 @@ func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) er
 		drainingCtx, cancel := context.WithTimeout(context.Background(), DefaultCleanupTimeout)
 		defer cancel()
 		if err := worker.TransitionTo(drainingCtx, WorkerStateDraining); err != nil {
-			log.Printf("Warning: failed to transition to draining state: %v", err)
+			if s.Logger != nil {
+				s.Logger.Error(drainingCtx, "Failed to transition to draining state", "error", err)
+			}
 		}
 	}
 
-	log.Printf("Context canceled, stopping Recreate strategy")
+	if s.Logger != nil {
+		s.Logger.Info(ctx, "Context canceled, stopping Recreate strategy")
+	}
 
 	return ctx.Err()
 }

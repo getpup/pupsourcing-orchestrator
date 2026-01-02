@@ -185,14 +185,13 @@ strategy := orchestrator.Recreate()
 // With worker lifecycle management
 persistence := &MyWorkerPersistence{} // Implement WorkerPersistenceAdapter
 
-workerConfig := orchestrator.WorkerConfig{
-    HeartbeatInterval:  5 * time.Second,
-    PersistenceAdapter: persistence,
-}
-
 strategy := &orchestrator.RecreateStrategy{
-    WorkerConfig:         &workerConfig,
+    WorkerConfig: orchestrator.WorkerConfig{
+        HeartbeatInterval:  5 * time.Second,
+        PersistenceAdapter: persistence,
+    },
     StaleWorkerThreshold: 30 * time.Second,
+    Logger:               myLogger, // Optional: inject es.Logger for observability
 }
 
 orch, err := orchestrator.New(
