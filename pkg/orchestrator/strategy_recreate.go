@@ -140,9 +140,7 @@ func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) er
 
 		// Update worker's observed generation if worker is active
 		if worker != nil {
-			worker.mu.Lock()
-			worker.generationSeen = newGeneration
-			worker.mu.Unlock()
+			worker.SetGenerationSeen(newGeneration)
 		}
 	}
 

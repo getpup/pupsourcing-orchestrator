@@ -186,6 +186,14 @@ func (w *Worker) ObserveGeneration(ctx context.Context) error {
 	return nil
 }
 
+// SetGenerationSeen updates the worker's observed generation without fetching from database.
+// This is useful when the generation has just been advanced by the current worker.
+func (w *Worker) SetGenerationSeen(generation int64) {
+	w.mu.Lock()
+	w.generationSeen = generation
+	w.mu.Unlock()
+}
+
 // Stop gracefully stops the worker
 func (w *Worker) Stop(ctx context.Context) error {
 	// Stop heartbeat
