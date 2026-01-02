@@ -14,8 +14,8 @@ type mockLogger struct {
 }
 
 func (m *mockLogger) Printf(format string, v ...interface{}) {
-	// Don't use fmt.Sprintf here since we might get plain strings from log.Printf
-	// Just check the format string matches and arguments exist
+	// Don't format to keep tests simple - we just verify the format strings
+	// are being called correctly with the right patterns
 	m.messages = append(m.messages, format)
 }
 

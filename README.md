@@ -161,21 +161,6 @@ This interface is compatible with `github.com/getpup/pupsourcing/es/projection.P
 ├── cmd/                    # Main applications
 │   └── orchestrator/       # Orchestrator application entry point
 ├── internal/               # Private application code
-│   └── orchestrator/       # Orchestrator business logic
-├── pkg/                    # Public library code
-│   └── version/            # Version information
-├── Makefile                # Build and CI automation
-├── .golangci.yml           # Linter configuration
-└── go.mod                  # Go module definition
-```
-
-## Project Structure
-
-```
-.
-├── cmd/                    # Main applications
-│   └── orchestrator/       # Orchestrator application entry point
-├── internal/               # Private application code
 │   └── orchestrator/       # Orchestrator business logic (deprecated, use pkg/)
 ├── pkg/                    # Public library code
 │   ├── orchestrator/       # Public orchestrator API
