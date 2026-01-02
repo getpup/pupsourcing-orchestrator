@@ -43,7 +43,7 @@ func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) er
 
 	var worker *Worker
 
-	// Initialize worker if config is provided and has a valid adapter
+	// Initialize worker if persistence adapter is configured
 	if s.WorkerConfig.PersistenceAdapter != nil {
 		var err error
 		worker, err = NewWorker(s.WorkerConfig)
