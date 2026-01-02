@@ -172,22 +172,77 @@ The Recreate strategy is a simple orchestration approach where all projections a
 - Simple and predictable
 - Guaranteed consistency (no parallel execution of same projection)
 - Downtime during updates (all instances stopped before new ones start)
+- Worker identity and lifecycle management
+- Automatic cleanup of stale workers
+- Heartbeat-based health monitoring
 
 **Usage:**
 
 ```go
-// Use the convenience function
+// Basic usage without worker management
 strategy := orchestrator.Recreate()
 
-// Or create with custom logger
+// With worker lifecycle management
+persistence := &MyWorkerPersistence{} // Implement WorkerPersistenceAdapter
+
 strategy := &orchestrator.RecreateStrategy{
-    Logger: myCustomLogger,
+    WorkerConfig: orchestrator.WorkerConfig{
+        HeartbeatInterval:  5 * time.Second,
+        PersistenceAdapter: persistence,
+    },
+    StaleWorkerThreshold: 30 * time.Second,
+    Logger:               myLogger, // Optional: inject es.Logger for observability
 }
 
 orch, err := orchestrator.New(
     orchestrator.WithStrategy(strategy),
     orchestrator.WithProjections(p1, p2, p3),
 )
+```
+
+**Worker Lifecycle:**
+
+When worker management is enabled, each orchestrator instance:
+1. Generates a stable worker ID (hostname + UUID)
+2. Registers itself in the `orchestrator.workers` table
+3. Sends periodic heartbeats to indicate it's alive
+4. Observes the current recreate generation
+5. Transitions through well-defined states:
+   - `starting` - Worker is initializing
+   - `ready` - Worker is connected and idle
+   - `running` - Worker is processing projections
+   - `draining` - Worker is finishing current batch before shutdown
+   - `stopped` - Worker has stopped
+
+**Crash Recovery:**
+
+Workers may disappear without cleanup (e.g., process crash, network partition).
+The system recovers via:
+- Stale worker detection based on last heartbeat timestamp
+- Automatic cleanup during Recreate strategy initialization
+- Default stale threshold: 30 seconds (configurable)
+
+**WorkerPersistenceAdapter Interface:**
+
+To enable worker management, implement the `WorkerPersistenceAdapter` interface:
+
+```go
+type WorkerPersistenceAdapter interface {
+    // RegisterWorker inserts or updates a worker record
+    RegisterWorker(ctx context.Context, workerID string, generation int64, state WorkerState) error
+
+    // UpdateWorkerHeartbeat updates the last_heartbeat timestamp
+    UpdateWorkerHeartbeat(ctx context.Context, workerID string, state WorkerState) error
+
+    // UpdateWorkerState updates the worker's state
+    UpdateWorkerState(ctx context.Context, workerID string, state WorkerState, generation int64) error
+
+    // GetCurrentGeneration retrieves the current recreate generation
+    GetCurrentGeneration(ctx context.Context) (int64, error)
+
+    // DeleteStaleWorkers removes workers with expired heartbeats
+    DeleteStaleWorkers(ctx context.Context, staleThreshold time.Duration) error
+}
 ```
 
 ### Projection Interface

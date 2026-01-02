@@ -125,6 +125,13 @@ Integration test organization:
 - Always use types and interfaces from pupsourcing where appropriate
 - Do not redefine interfaces that already exist in pupsourcing
 
+## Logging
+
+- Do not use the standard library `log` package for logging
+- Inject the `github.com/getpup/pupsourcing/es.Logger` interface for observability
+- Logger should be optional (check for nil before logging)
+- Use structured logging with key-value pairs: `logger.Info(ctx, "message", "key", value)`
+
 ## Code Style
 
 - Follow standard Go conventions
