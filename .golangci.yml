@@ -1,0 +1,14 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gocritic
+
+run:
+  timeout: 5m
+  tests: true
