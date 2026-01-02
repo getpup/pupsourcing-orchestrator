@@ -36,3 +36,6 @@ Thumbs.db
 # Temporary files
 tmp/
 *.tmp
+
+# Generated migrations (examples)
+examples/*/migrations/
