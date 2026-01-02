@@ -459,3 +459,114 @@ func TestWorker_StateTransitions(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupStaleWorkers_Success(t *testing.T) {
+	persistence := newMockWorkerPersistence()
+	ctx := context.Background()
+
+	// Create some workers with different heartbeat times
+	persistence.mu.Lock()
+	persistence.workers["worker-1"] = &workerRecord{
+		id:            "worker-1",
+		lastHeartbeat: time.Now().Add(-1 * time.Minute), // Stale
+		state:         WorkerStateRunning,
+	}
+	persistence.workers["worker-2"] = &workerRecord{
+		id:            "worker-2",
+		lastHeartbeat: time.Now(), // Fresh
+		state:         WorkerStateRunning,
+	}
+	persistence.workers["worker-3"] = &workerRecord{
+		id:            "worker-3",
+		lastHeartbeat: time.Now().Add(-2 * time.Minute), // Stale
+		state:         WorkerStateRunning,
+	}
+	persistence.mu.Unlock()
+
+	// Cleanup workers older than 30 seconds
+	err := CleanupStaleWorkers(ctx, persistence, 30*time.Second)
+	if err != nil {
+		t.Fatalf("Failed to cleanup stale workers: %v", err)
+	}
+
+	// Check that only fresh worker remains
+	persistence.mu.Lock()
+	workerCount := len(persistence.workers)
+	_, worker1Exists := persistence.workers["worker-1"]
+	_, worker2Exists := persistence.workers["worker-2"]
+	_, worker3Exists := persistence.workers["worker-3"]
+	persistence.mu.Unlock()
+
+	if workerCount != 1 {
+		t.Errorf("Expected 1 worker to remain, got: %d", workerCount)
+	}
+
+	if worker1Exists {
+		t.Error("Expected worker-1 to be deleted (stale)")
+	}
+
+	if !worker2Exists {
+		t.Error("Expected worker-2 to remain (fresh)")
+	}
+
+	if worker3Exists {
+		t.Error("Expected worker-3 to be deleted (stale)")
+	}
+}
+
+func TestCleanupStaleWorkers_RequiresAdapter(t *testing.T) {
+	ctx := context.Background()
+
+	err := CleanupStaleWorkers(ctx, nil, 30*time.Second)
+	if err == nil {
+		t.Fatal("Expected error when adapter is nil")
+	}
+
+	if !strings.Contains(err.Error(), "persistence adapter is required") {
+		t.Errorf("Expected error about adapter, got: %v", err)
+	}
+}
+
+func TestCleanupStaleWorkers_DefaultThreshold(t *testing.T) {
+	persistence := newMockWorkerPersistence()
+	ctx := context.Background()
+
+	// Add a worker
+	persistence.mu.Lock()
+	persistence.workers["worker-1"] = &workerRecord{
+		id:            "worker-1",
+		lastHeartbeat: time.Now(),
+		state:         WorkerStateRunning,
+	}
+	persistence.mu.Unlock()
+
+	// Call cleanup with 0 threshold (should default to 30s)
+	err := CleanupStaleWorkers(ctx, persistence, 0)
+	if err != nil {
+		t.Fatalf("Failed to cleanup: %v", err)
+	}
+
+	// Worker should still exist (fresh heartbeat)
+	persistence.mu.Lock()
+	workerCount := len(persistence.workers)
+	persistence.mu.Unlock()
+
+	if workerCount != 1 {
+		t.Errorf("Expected 1 worker to remain, got: %d", workerCount)
+	}
+}
+
+func TestCleanupStaleWorkers_HandlesError(t *testing.T) {
+	persistence := newMockWorkerPersistence()
+	persistence.deleteStaleWorkersErr = errors.New("database error")
+	ctx := context.Background()
+
+	err := CleanupStaleWorkers(ctx, persistence, 30*time.Second)
+	if err == nil {
+		t.Fatal("Expected error from adapter")
+	}
+
+	if !strings.Contains(err.Error(), "database error") {
+		t.Errorf("Expected database error, got: %v", err)
+	}
+}

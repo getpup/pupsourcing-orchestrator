@@ -221,3 +221,18 @@ func (w *Worker) heartbeatLoop(ctx context.Context) {
 		}
 	}
 }
+
+// CleanupStaleWorkers removes workers that haven't sent a heartbeat within the threshold
+// This is typically called during Recreate phase to clean up crashed workers
+func CleanupStaleWorkers(ctx context.Context, adapter WorkerPersistenceAdapter, staleThreshold time.Duration) error {
+	if adapter == nil {
+		return fmt.Errorf("persistence adapter is required")
+	}
+
+	if staleThreshold == 0 {
+		// Default to 30 seconds if not specified
+		staleThreshold = 30 * time.Second
+	}
+
+	return adapter.DeleteStaleWorkers(ctx, staleThreshold)
+}
