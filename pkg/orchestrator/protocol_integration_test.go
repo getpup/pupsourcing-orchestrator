@@ -28,7 +28,7 @@ func setupPostgresTestDB(t *testing.T) (*sql.DB, string, func()) {
 
 	// Create test schema
 	testSchema := fmt.Sprintf("orchestrator_test_%d", time.Now().Unix())
-	
+
 	_, err = db.Exec(fmt.Sprintf("CREATE SCHEMA %s", testSchema))
 	if err != nil {
 		db.Close()

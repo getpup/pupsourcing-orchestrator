@@ -7,6 +7,12 @@ import (
 
 // RecreatePhase represents the current phase in the Recreate strategy coordination protocol.
 //
+// The Recreate protocol enables coordinated deployments across multiple orchestrator workers
+// in a distributed system. It ensures that during a deployment/update:
+// - All workers drain their current work before reconfiguration
+// - Shard ownership is reassigned deterministically
+// - Workers resume processing only after all workers are ready
+//
 // Phase Invariants:
 //
 // idle:
@@ -14,6 +20,7 @@ import (
 //   - Workers may be processing shards normally
 //   - Shards may have assigned owners
 //   - Safe to initiate new recreate cycle
+//   - State is crash-safe: restarting an orchestrator in idle phase is safe
 //
 // draining:
 //   - All workers have been signaled to stop pulling new events
@@ -21,6 +28,9 @@ import (
 //   - Workers must transition to 'ready' state when done
 //   - No new shard assignments are made
 //   - Transition to 'assigning' only when all workers are 'ready' or 'stopped'
+//   - State is crash-safe: if orchestrator crashes during draining, workers continue
+//     draining based on their local state. New orchestrator can resume coordination
+//     by checking worker states and waiting for all to be ready.
 //
 // assigning:
 //   - All shard ownership has been cleared
@@ -28,11 +38,45 @@ import (
 //   - New ownership records are being persisted to projection_shards
 //   - Workers are waiting for assignment
 //   - Transition to 'running' only after all assignments are complete
+//   - State is crash-safe: if orchestrator crashes during assignment, operation
+//     is idempotent. Restarted orchestrator can detect partial assignments and
+//     either complete them or clear and restart assignment.
 //
 // running:
 //   - Workers have resumed processing their assigned shards
 //   - Normal operation until next recreate cycle
 //   - Can transition back to 'idle' when recreate cycle completes
+//   - State is crash-safe: workers continue processing based on their assigned
+//     shards. New orchestrator can observe running state and continue coordination.
+//
+// Crash-Safety Guarantees:
+//
+// The protocol is designed to be fully crash-safe at any phase:
+//
+// 1. All phase transitions use SQL transactions to ensure atomic updates
+// 2. Phase transitions are idempotent - can be safely retried
+// 3. Workers maintain their state independently and can recover from crashes
+// 4. The protocol state (generation + phase) persists in the database
+// 5. New orchestrator instances can resume coordination from any phase
+// 6. No distributed locks or consensus algorithms required - uses database ACID properties
+//
+// Recovery Scenarios:
+//
+// - Orchestrator crashes in idle: New orchestrator reads idle state and continues normally
+// - Orchestrator crashes in draining: New orchestrator waits for workers to be ready
+// - Orchestrator crashes in assigning: New orchestrator completes shard assignment
+// - Orchestrator crashes in running: New orchestrator observes running state
+// - Worker crashes: Other workers continue; stale worker is cleaned up by heartbeat timeout
+// - Database connection lost: Operations fail and can be retried when connection restored
+//
+// Late-Joining Workers:
+//
+// Workers that start after a recreate cycle has begun will:
+// 1. Observe the current generation from the database
+// 2. Transition to 'ready' state if in draining phase
+// 3. Wait for shard assignment if in assigning phase
+// 4. Receive assigned shards once protocol reaches running phase
+// 5. Begin processing their assigned shards normally
 type RecreatePhase string
 
 const (

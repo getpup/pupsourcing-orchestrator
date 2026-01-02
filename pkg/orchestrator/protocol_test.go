@@ -19,16 +19,16 @@ type mockProtocolPersistence struct {
 	clearedShardOwnership  bool
 
 	// Error injection
-	getStateErr          error
-	transitionPhaseErr   error
-	incrementGenErr      error
-	getReadyCountErr     error
-	getTotalCountErr     error
-	clearOwnershipErr    error
-	assignShardsErr      error
-	getProjectionsErr    error
-	getWorkersErr        error
-	getShardCountErr     error
+	getStateErr        error
+	transitionPhaseErr error
+	incrementGenErr    error
+	getReadyCountErr   error
+	getTotalCountErr   error
+	clearOwnershipErr  error
+	assignShardsErr    error
+	getProjectionsErr  error
+	getWorkersErr      error
+	getShardCountErr   error
 }
 
 func newMockProtocolPersistence() *mockProtocolPersistence {
@@ -352,7 +352,7 @@ func TestPerformShardAssignment_DeterministicDistribution(t *testing.T) {
 
 	// Verify distribution
 	assignments := persistence.shardAssignments["projection-1"]
-	
+
 	// Each worker should get 3 shards (9 / 3 = 3)
 	for workerID, shards := range assignments {
 		if len(shards) != 3 {
