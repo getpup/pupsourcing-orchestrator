@@ -1,4 +1,4 @@
-version: 2
+version: "2"
 
 linters:
   enable:
@@ -7,6 +7,7 @@ linters:
     - ineffassign
     - staticcheck
     - unused
+    - gocritic
 
 run:
   timeout: 5m
