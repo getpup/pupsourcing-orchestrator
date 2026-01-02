@@ -16,6 +16,11 @@ import (
 	"github.com/getpup/pupsourcing-orchestrator/pkg/migrations"
 )
 
+// NOTE: Integration tests use string interpolation for SQL queries with validated
+// configuration values. This is acceptable in test code as all config values are
+// controlled by the test and have been validated by the migrations package.
+// Production code should always use parameterized queries.
+
 func TestIntegrationPostgres(t *testing.T) {
 	// Skip if DATABASE_URL not set
 	dbURL := os.Getenv("POSTGRES_URL")
