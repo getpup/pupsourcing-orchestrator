@@ -11,12 +11,11 @@ func TestGeneratePostgres(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		OutputFolder:          tmpDir,
-		OutputFilename:        "test_migration.sql",
-		SchemaName:            "orchestrator",
-		ProjectionShardsTable: "projection_shards",
-		RecreateLockTable:     "recreate_lock",
-		WorkersTable:          "workers",
+		OutputFolder:       tmpDir,
+		OutputFilename:     "test_migration.sql",
+		SchemaName:         "orchestrator",
+		RecreateStateTable: "recreate_state",
+		WorkersTable:       "workers",
 	}
 
 	err := GeneratePostgres(&config)
@@ -38,43 +37,20 @@ func TestGeneratePostgres(t *testing.T) {
 		t.Error("Missing schema creation")
 	}
 
-	// Verify projection_shards table
-	requiredProjectionShardsStrings := []string{
-		"CREATE TABLE IF NOT EXISTS orchestrator.projection_shards",
-		"projection_name TEXT NOT NULL",
-		"shard_id INT NOT NULL",
-		"shard_count INT NOT NULL",
-		"last_global_position BIGINT NOT NULL DEFAULT 0",
-		"owner_id TEXT",
-		"state TEXT NOT NULL DEFAULT 'idle'",
-		"CHECK (state IN ('idle', 'assigned', 'draining'))",
+	// Verify recreate_state table
+	requiredRecreateStateStrings := []string{
+		"CREATE TABLE IF NOT EXISTS orchestrator.recreate_state",
+		"state_id INT PRIMARY KEY DEFAULT 1 CHECK (state_id = 1)",
+		"current_generation BIGINT NOT NULL DEFAULT 0",
 		"updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-		"PRIMARY KEY (projection_name, shard_id)",
-		"CHECK (shard_id >= 0 AND shard_id < shard_count)",
+		"INSERT INTO orchestrator.recreate_state",
+		"VALUES (1, 0, NOW())",
+		"ON CONFLICT (state_id) DO NOTHING",
 	}
 
-	for _, required := range requiredProjectionShardsStrings {
+	for _, required := range requiredRecreateStateStrings {
 		if !strings.Contains(sql, required) {
-			t.Errorf("projection_shards table missing required string: %s", required)
-		}
-	}
-
-	// Verify recreate_lock table
-	requiredRecreateLockStrings := []string{
-		"CREATE TABLE IF NOT EXISTS orchestrator.recreate_lock",
-		"lock_id INT PRIMARY KEY DEFAULT 1 CHECK (lock_id = 1)",
-		"generation BIGINT NOT NULL DEFAULT 0",
-		"phase TEXT NOT NULL DEFAULT 'idle'",
-		"CHECK (phase IN ('idle', 'draining', 'assigning', 'running'))",
-		"updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-		"INSERT INTO orchestrator.recreate_lock",
-		"VALUES (1, 0, 'idle', NOW())",
-		"ON CONFLICT (lock_id) DO NOTHING",
-	}
-
-	for _, required := range requiredRecreateLockStrings {
-		if !strings.Contains(sql, required) {
-			t.Errorf("recreate_lock table missing required string: %s", required)
+			t.Errorf("recreate_state table missing required string: %s", required)
 		}
 	}
 
@@ -96,10 +72,7 @@ func TestGeneratePostgres(t *testing.T) {
 
 	// Verify indexes are created
 	requiredIndexes := []string{
-		"idx_projection_shards_state",
-		"idx_projection_shards_owner",
-		"idx_projection_shards_updated",
-		"idx_recreate_lock_updated",
+		"idx_recreate_state_updated",
 		"idx_workers_status",
 		"idx_workers_heartbeat",
 		"idx_workers_generation",
@@ -116,12 +89,11 @@ func TestGeneratePostgres_CustomNames(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		OutputFolder:          tmpDir,
-		OutputFilename:        "custom_migration.sql",
-		SchemaName:            "custom_schema",
-		ProjectionShardsTable: "custom_shards",
-		RecreateLockTable:     "custom_lock",
-		WorkersTable:          "custom_workers",
+		OutputFolder:       tmpDir,
+		OutputFilename:     "custom_migration.sql",
+		SchemaName:         "custom_schema",
+		RecreateStateTable: "custom_state",
+		WorkersTable:       "custom_workers",
 	}
 
 	err := GeneratePostgres(&config)
@@ -141,11 +113,8 @@ func TestGeneratePostgres_CustomNames(t *testing.T) {
 	if !strings.Contains(sql, "CREATE SCHEMA IF NOT EXISTS custom_schema") {
 		t.Error("Custom schema name not used")
 	}
-	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_schema.custom_shards") {
-		t.Error("Custom projection shards table name not used")
-	}
-	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_schema.custom_lock") {
-		t.Error("Custom recreate lock table name not used")
+	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_schema.custom_state") {
+		t.Error("Custom recreate state table name not used")
 	}
 	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_schema.custom_workers") {
 		t.Error("Custom workers table name not used")
@@ -156,12 +125,11 @@ func TestGenerateMySQL(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		OutputFolder:          tmpDir,
-		OutputFilename:        "test_migration.sql",
-		SchemaName:            "orchestrator",
-		ProjectionShardsTable: "projection_shards",
-		RecreateLockTable:     "recreate_lock",
-		WorkersTable:          "workers",
+		OutputFolder:       tmpDir,
+		OutputFilename:     "test_migration.sql",
+		SchemaName:         "orchestrator",
+		RecreateStateTable: "recreate_state",
+		WorkersTable:       "workers",
 	}
 
 	err := GenerateMySQL(&config)
@@ -186,44 +154,23 @@ func TestGenerateMySQL(t *testing.T) {
 		t.Error("Missing USE database statement")
 	}
 
-	// Verify projection_shards table for MySQL
-	requiredProjectionShardsStrings := []string{
-		"CREATE TABLE IF NOT EXISTS projection_shards",
-		"projection_name VARCHAR(255) NOT NULL",
-		"shard_id INT NOT NULL",
-		"shard_count INT NOT NULL",
-		"last_global_position BIGINT NOT NULL DEFAULT 0",
-		"owner_id VARCHAR(255)",
-		"state ENUM('idle', 'assigned', 'draining') NOT NULL DEFAULT 'idle'",
+	// Verify recreate_state table for MySQL
+	requiredRecreateStateStrings := []string{
+		"CREATE TABLE IF NOT EXISTS recreate_state",
+		"state_id INT PRIMARY KEY DEFAULT 1",
+		"current_generation BIGINT NOT NULL DEFAULT 0",
 		"updated_at TIMESTAMP(6) NOT NULL",
-		"PRIMARY KEY (projection_name, shard_id)",
-		"CHECK (shard_id >= 0 AND shard_id < shard_count)",
+		"CHECK (state_id = 1)",
+		"INSERT INTO recreate_state",
+		"VALUES (1, 0,",
+		"ON DUPLICATE KEY UPDATE state_id = state_id",
 		"ENGINE=InnoDB",
 		"CHARSET=utf8mb4",
 	}
 
-	for _, required := range requiredProjectionShardsStrings {
+	for _, required := range requiredRecreateStateStrings {
 		if !strings.Contains(sql, required) {
-			t.Errorf("projection_shards table missing required string: %s", required)
-		}
-	}
-
-	// Verify recreate_lock table
-	requiredRecreateLockStrings := []string{
-		"CREATE TABLE IF NOT EXISTS recreate_lock",
-		"lock_id INT PRIMARY KEY DEFAULT 1",
-		"generation BIGINT NOT NULL DEFAULT 0",
-		"phase ENUM('idle', 'draining', 'assigning', 'running') NOT NULL DEFAULT 'idle'",
-		"updated_at TIMESTAMP(6) NOT NULL",
-		"CHECK (lock_id = 1)",
-		"INSERT INTO recreate_lock",
-		"VALUES (1, 0, 'idle',",
-		"ON DUPLICATE KEY UPDATE lock_id = lock_id",
-	}
-
-	for _, required := range requiredRecreateLockStrings {
-		if !strings.Contains(sql, required) {
-			t.Errorf("recreate_lock table missing required string: %s", required)
+			t.Errorf("recreate_state table missing required string: %s", required)
 		}
 	}
 
@@ -244,10 +191,7 @@ func TestGenerateMySQL(t *testing.T) {
 
 	// Verify indexes
 	requiredIndexes := []string{
-		"idx_projection_shards_state",
-		"idx_projection_shards_owner",
-		"idx_projection_shards_updated",
-		"idx_recreate_lock_updated",
+		"idx_recreate_state_updated",
 		"idx_workers_status",
 		"idx_workers_heartbeat",
 		"idx_workers_generation",
@@ -264,12 +208,11 @@ func TestGenerateMySQL_CustomNames(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		OutputFolder:          tmpDir,
-		OutputFilename:        "custom_migration.sql",
-		SchemaName:            "custom_db",
-		ProjectionShardsTable: "custom_shards",
-		RecreateLockTable:     "custom_lock",
-		WorkersTable:          "custom_workers",
+		OutputFolder:       tmpDir,
+		OutputFilename:     "custom_migration.sql",
+		SchemaName:         "custom_db",
+		RecreateStateTable: "custom_state",
+		WorkersTable:       "custom_workers",
 	}
 
 	err := GenerateMySQL(&config)
@@ -289,11 +232,8 @@ func TestGenerateMySQL_CustomNames(t *testing.T) {
 	if !strings.Contains(sql, "CREATE DATABASE IF NOT EXISTS custom_db") {
 		t.Error("Custom database name not used")
 	}
-	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_shards") {
-		t.Error("Custom projection shards table name not used")
-	}
-	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_lock") {
-		t.Error("Custom recreate lock table name not used")
+	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_state") {
+		t.Error("Custom recreate state table name not used")
 	}
 	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_workers") {
 		t.Error("Custom workers table name not used")
@@ -304,12 +244,11 @@ func TestGenerateSQLite(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		OutputFolder:          tmpDir,
-		OutputFilename:        "test_migration.sql",
-		SchemaName:            "orchestrator",
-		ProjectionShardsTable: "projection_shards",
-		RecreateLockTable:     "recreate_lock",
-		WorkersTable:          "workers",
+		OutputFolder:       tmpDir,
+		OutputFilename:     "test_migration.sql",
+		SchemaName:         "orchestrator",
+		RecreateStateTable: "recreate_state",
+		WorkersTable:       "workers",
 	}
 
 	err := GenerateSQLite(&config)
@@ -326,42 +265,19 @@ func TestGenerateSQLite(t *testing.T) {
 
 	sql := string(content)
 
-	// Verify projection_shards table for SQLite (with prefix)
-	requiredProjectionShardsStrings := []string{
-		"CREATE TABLE IF NOT EXISTS orchestrator_projection_shards",
-		"projection_name TEXT NOT NULL",
-		"shard_id INTEGER NOT NULL",
-		"shard_count INTEGER NOT NULL",
-		"last_global_position INTEGER NOT NULL DEFAULT 0",
-		"owner_id TEXT",
-		"state TEXT NOT NULL DEFAULT 'idle'",
-		"CHECK (state IN ('idle', 'assigned', 'draining'))",
+	// Verify recreate_state table for SQLite (with prefix)
+	requiredRecreateStateStrings := []string{
+		"CREATE TABLE IF NOT EXISTS orchestrator_recreate_state",
+		"state_id INTEGER PRIMARY KEY DEFAULT 1 CHECK (state_id = 1)",
+		"current_generation INTEGER NOT NULL DEFAULT 0",
 		"updated_at TEXT NOT NULL",
-		"PRIMARY KEY (projection_name, shard_id)",
-		"CHECK (shard_id >= 0 AND shard_id < shard_count)",
+		"INSERT OR IGNORE INTO orchestrator_recreate_state",
+		"VALUES (1, 0, datetime('now'))",
 	}
 
-	for _, required := range requiredProjectionShardsStrings {
+	for _, required := range requiredRecreateStateStrings {
 		if !strings.Contains(sql, required) {
-			t.Errorf("projection_shards table missing required string: %s", required)
-		}
-	}
-
-	// Verify recreate_lock table
-	requiredRecreateLockStrings := []string{
-		"CREATE TABLE IF NOT EXISTS orchestrator_recreate_lock",
-		"lock_id INTEGER PRIMARY KEY DEFAULT 1 CHECK (lock_id = 1)",
-		"generation INTEGER NOT NULL DEFAULT 0",
-		"phase TEXT NOT NULL DEFAULT 'idle'",
-		"CHECK (phase IN ('idle', 'draining', 'assigning', 'running'))",
-		"updated_at TEXT NOT NULL",
-		"INSERT OR IGNORE INTO orchestrator_recreate_lock",
-		"VALUES (1, 0, 'idle', datetime('now'))",
-	}
-
-	for _, required := range requiredRecreateLockStrings {
-		if !strings.Contains(sql, required) {
-			t.Errorf("recreate_lock table missing required string: %s", required)
+			t.Errorf("recreate_state table missing required string: %s", required)
 		}
 	}
 
@@ -383,10 +299,7 @@ func TestGenerateSQLite(t *testing.T) {
 
 	// Verify indexes (with table prefix)
 	requiredIndexes := []string{
-		"idx_orchestrator_projection_shards_state",
-		"idx_orchestrator_projection_shards_owner",
-		"idx_orchestrator_projection_shards_updated",
-		"idx_orchestrator_recreate_lock_updated",
+		"idx_orchestrator_recreate_state_updated",
 		"idx_orchestrator_workers_status",
 		"idx_orchestrator_workers_heartbeat",
 		"idx_orchestrator_workers_generation",
@@ -403,12 +316,11 @@ func TestGenerateSQLite_CustomNames(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		OutputFolder:          tmpDir,
-		OutputFilename:        "custom_migration.sql",
-		SchemaName:            "custom",
-		ProjectionShardsTable: "custom_shards",
-		RecreateLockTable:     "custom_lock",
-		WorkersTable:          "custom_workers",
+		OutputFolder:       tmpDir,
+		OutputFilename:     "custom_migration.sql",
+		SchemaName:         "custom",
+		RecreateStateTable: "custom_state",
+		WorkersTable:       "custom_workers",
 	}
 
 	err := GenerateSQLite(&config)
@@ -425,11 +337,8 @@ func TestGenerateSQLite_CustomNames(t *testing.T) {
 	sql := string(content)
 
 	// Verify custom names are used (with schema prefix)
-	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_custom_shards") {
-		t.Error("Custom projection shards table name not used")
-	}
-	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_custom_lock") {
-		t.Error("Custom recreate lock table name not used")
+	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_custom_state") {
+		t.Error("Custom recreate state table name not used")
 	}
 	if !strings.Contains(sql, "CREATE TABLE IF NOT EXISTS custom_custom_workers") {
 		t.Error("Custom workers table name not used")
@@ -446,11 +355,8 @@ func TestDefaultConfig(t *testing.T) {
 	if config.SchemaName != "orchestrator" {
 		t.Errorf("Expected SchemaName to be 'orchestrator', got '%s'", config.SchemaName)
 	}
-	if config.ProjectionShardsTable != "projection_shards" {
-		t.Errorf("Expected ProjectionShardsTable to be 'projection_shards', got '%s'", config.ProjectionShardsTable)
-	}
-	if config.RecreateLockTable != "recreate_lock" {
-		t.Errorf("Expected RecreateLockTable to be 'recreate_lock', got '%s'", config.RecreateLockTable)
+	if config.RecreateStateTable != "recreate_state" {
+		t.Errorf("Expected RecreateStateTable to be 'recreate_state', got '%s'", config.RecreateStateTable)
 	}
 	if config.WorkersTable != "workers" {
 		t.Errorf("Expected WorkersTable to be 'workers', got '%s'", config.WorkersTable)
@@ -503,40 +409,36 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid config",
 			config: Config{
-				SchemaName:            "orchestrator",
-				ProjectionShardsTable: "projection_shards",
-				RecreateLockTable:     "recreate_lock",
-				WorkersTable:          "workers",
+				SchemaName:         "orchestrator",
+				RecreateStateTable: "recreate_state",
+				WorkersTable:       "workers",
 			},
 			wantError: false,
 		},
 		{
 			name: "invalid schema name",
 			config: Config{
-				SchemaName:            "schema; DROP TABLE users--",
-				ProjectionShardsTable: "projection_shards",
-				RecreateLockTable:     "recreate_lock",
-				WorkersTable:          "workers",
+				SchemaName:         "schema; DROP TABLE users--",
+				RecreateStateTable: "recreate_state",
+				WorkersTable:       "workers",
 			},
 			wantError: true,
 		},
 		{
-			name: "invalid projection shards table",
+			name: "invalid recreate state table",
 			config: Config{
-				SchemaName:            "orchestrator",
-				ProjectionShardsTable: "table'; DROP TABLE users--",
-				RecreateLockTable:     "recreate_lock",
-				WorkersTable:          "workers",
+				SchemaName:         "orchestrator",
+				RecreateStateTable: "table'; DROP TABLE users--",
+				WorkersTable:       "workers",
 			},
 			wantError: true,
 		},
 		{
 			name: "empty schema name",
 			config: Config{
-				SchemaName:            "",
-				ProjectionShardsTable: "projection_shards",
-				RecreateLockTable:     "recreate_lock",
-				WorkersTable:          "workers",
+				SchemaName:         "",
+				RecreateStateTable: "recreate_state",
+				WorkersTable:       "workers",
 			},
 			wantError: true,
 		},
@@ -559,12 +461,11 @@ func TestGeneratePostgres_InvalidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		OutputFolder:          tmpDir,
-		OutputFilename:        "test.sql",
-		SchemaName:            "schema'; DROP TABLE users--",
-		ProjectionShardsTable: "projection_shards",
-		RecreateLockTable:     "recreate_lock",
-		WorkersTable:          "workers",
+		OutputFolder:       tmpDir,
+		OutputFilename:     "test.sql",
+		SchemaName:         "schema'; DROP TABLE users--",
+		RecreateStateTable: "recreate_state",
+		WorkersTable:       "workers",
 	}
 
 	err := GeneratePostgres(&config)
@@ -580,12 +481,11 @@ func TestGenerateMySQL_InvalidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		OutputFolder:          tmpDir,
-		OutputFilename:        "test.sql",
-		SchemaName:            "orchestrator",
-		ProjectionShardsTable: "table'; DROP TABLE users--",
-		RecreateLockTable:     "recreate_lock",
-		WorkersTable:          "workers",
+		OutputFolder:       tmpDir,
+		OutputFilename:     "test.sql",
+		SchemaName:         "orchestrator",
+		RecreateStateTable: "table'; DROP TABLE users--",
+		WorkersTable:       "workers",
 	}
 
 	err := GenerateMySQL(&config)
@@ -601,12 +501,11 @@ func TestGenerateSQLite_InvalidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	config := Config{
-		OutputFolder:          tmpDir,
-		OutputFilename:        "test.sql",
-		SchemaName:            "orchestrator",
-		ProjectionShardsTable: "projection_shards",
-		RecreateLockTable:     "recreate_lock",
-		WorkersTable:          "workers'; DROP TABLE users--",
+		OutputFolder:       tmpDir,
+		OutputFilename:     "test.sql",
+		SchemaName:         "orchestrator",
+		RecreateStateTable: "recreate_state",
+		WorkersTable:       "workers'; DROP TABLE users--",
 	}
 
 	err := GenerateSQLite(&config)

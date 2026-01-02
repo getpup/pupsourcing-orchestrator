@@ -29,13 +29,12 @@ import (
 
 func main() {
 	var (
-		adapter               = flag.String("adapter", "postgres", "Database adapter: postgres, mysql, or sqlite")
-		outputFolder          = flag.String("output", "migrations", "Output folder for migration file")
-		outputFilename        = flag.String("filename", "", "Output filename (default: timestamp-based)")
-		schemaName            = flag.String("schema", "orchestrator", "Schema name (PostgreSQL) or database name (MySQL)")
-		projectionShardsTable = flag.String("projection-shards-table", "projection_shards", "Name of projection shards table")
-		recreateLockTable     = flag.String("recreate-lock-table", "recreate_lock", "Name of recreate lock table")
-		workersTable          = flag.String("workers-table", "workers", "Name of workers table")
+		adapter            = flag.String("adapter", "postgres", "Database adapter: postgres, mysql, or sqlite")
+		outputFolder       = flag.String("output", "migrations", "Output folder for migration file")
+		outputFilename     = flag.String("filename", "", "Output filename (default: timestamp-based)")
+		schemaName         = flag.String("schema", "orchestrator", "Schema name (PostgreSQL) or database name (MySQL)")
+		recreateStateTable = flag.String("recreate-state-table", "recreate_state", "Name of recreate state table")
+		workersTable       = flag.String("workers-table", "workers", "Name of workers table")
 	)
 
 	flag.Parse()
@@ -43,8 +42,7 @@ func main() {
 	config := migrations.DefaultConfig()
 	config.OutputFolder = *outputFolder
 	config.SchemaName = *schemaName
-	config.ProjectionShardsTable = *projectionShardsTable
-	config.RecreateLockTable = *recreateLockTable
+	config.RecreateStateTable = *recreateStateTable
 	config.WorkersTable = *workersTable
 
 	if *outputFilename != "" {

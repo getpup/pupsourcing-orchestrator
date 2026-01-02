@@ -27,10 +27,7 @@ func validateConfig(config *Config) error {
 	if err := validateIdentifier(config.SchemaName, "SchemaName"); err != nil {
 		return err
 	}
-	if err := validateIdentifier(config.ProjectionShardsTable, "ProjectionShardsTable"); err != nil {
-		return err
-	}
-	if err := validateIdentifier(config.RecreateLockTable, "RecreateLockTable"); err != nil {
+	if err := validateIdentifier(config.RecreateStateTable, "RecreateStateTable"); err != nil {
 		return err
 	}
 	if err := validateIdentifier(config.WorkersTable, "WorkersTable"); err != nil {
@@ -51,11 +48,8 @@ type Config struct {
 	// For SQLite, table name prefixes are used instead of schemas (e.g., orchestrator_table_name)
 	SchemaName string
 
-	// ProjectionShardsTable is the name of the projection shards coordination table
-	ProjectionShardsTable string
-
-	// RecreateLockTable is the name of the recreate strategy lock table
-	RecreateLockTable string
+	// RecreateStateTable is the name of the recreate strategy state table
+	RecreateStateTable string
 
 	// WorkersTable is the name of the workers heartbeat table
 	WorkersTable string
@@ -65,12 +59,11 @@ type Config struct {
 func DefaultConfig() Config {
 	timestamp := time.Now().Format("20060102150405")
 	return Config{
-		OutputFolder:          "migrations",
-		OutputFilename:        fmt.Sprintf("%s_init_orchestrator_coordination.sql", timestamp),
-		SchemaName:            "orchestrator",
-		ProjectionShardsTable: "projection_shards",
-		RecreateLockTable:     "recreate_lock",
-		WorkersTable:          "workers",
+		OutputFolder:       "migrations",
+		OutputFilename:     fmt.Sprintf("%s_init_orchestrator_coordination.sql", timestamp),
+		SchemaName:         "orchestrator",
+		RecreateStateTable: "recreate_state",
+		WorkersTable:       "workers",
 	}
 }
 
@@ -104,51 +97,20 @@ func generatePostgresSQL(config *Config) string {
 -- Create orchestrator schema for coordination tables
 CREATE SCHEMA IF NOT EXISTS %s;
 
--- Projection shards table manages shard ownership and coordination for projections
--- Ensures each shard of a projection is owned by at most one worker at a time
--- Supports horizontal scaling by partitioning projection workload across shards
+-- Recreate state table coordinates recreate strategy deployments
+-- Singleton table (single row) that tracks current generation
+-- Ensures only one generation is active at a time
+-- Uses transactional CAS-style updates for generation advancement
 CREATE TABLE IF NOT EXISTS %s.%s (
-    projection_name TEXT NOT NULL,
-    shard_id INT NOT NULL,
-    shard_count INT NOT NULL,
-    last_global_position BIGINT NOT NULL DEFAULT 0,
-    owner_id TEXT,
-    state TEXT NOT NULL DEFAULT 'idle' CHECK (state IN ('idle', 'assigned', 'draining')),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
-    PRIMARY KEY (projection_name, shard_id),
-    
-    -- Ensure shard_id is within valid range for shard_count
-    CHECK (shard_id >= 0 AND shard_id < shard_count)
-);
-
--- Index for querying shards by state (e.g., finding idle shards to assign)
-CREATE INDEX IF NOT EXISTS idx_%s_state 
-    ON %s.%s (state, projection_name, shard_id);
-
--- Index for querying shards by owner (e.g., finding all shards owned by a worker)
-CREATE INDEX IF NOT EXISTS idx_%s_owner 
-    ON %s.%s (owner_id, projection_name) WHERE owner_id IS NOT NULL;
-
--- Index for observability and monitoring
-CREATE INDEX IF NOT EXISTS idx_%s_updated 
-    ON %s.%s (updated_at DESC);
-
--- Recreate lock table coordinates recreate strategy deployments
--- Singleton table (single row) that tracks deployment generation and phase
--- Prevents parallel deployments and ensures consistent state transitions
--- No advisory locks needed - uses standard transactional operations
-CREATE TABLE IF NOT EXISTS %s.%s (
-    lock_id INT PRIMARY KEY DEFAULT 1 CHECK (lock_id = 1),
-    generation BIGINT NOT NULL DEFAULT 0,
-    phase TEXT NOT NULL DEFAULT 'idle' CHECK (phase IN ('idle', 'draining', 'assigning', 'running')),
+    state_id INT PRIMARY KEY DEFAULT 1 CHECK (state_id = 1),
+    current_generation BIGINT NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Initialize the singleton lock row
-INSERT INTO %s.%s (lock_id, generation, phase, updated_at)
-VALUES (1, 0, 'idle', NOW())
-ON CONFLICT (lock_id) DO NOTHING;
+-- Initialize the singleton state row
+INSERT INTO %s.%s (state_id, current_generation, updated_at)
+VALUES (1, 0, NOW())
+ON CONFLICT (state_id) DO NOTHING;
 
 -- Index for observability
 CREATE INDEX IF NOT EXISTS idx_%s_updated 
@@ -178,13 +140,9 @@ CREATE INDEX IF NOT EXISTS idx_%s_generation
 `,
 		time.Now().Format(time.RFC3339),
 		config.SchemaName,
-		config.SchemaName, config.ProjectionShardsTable,
-		config.ProjectionShardsTable, config.SchemaName, config.ProjectionShardsTable,
-		config.ProjectionShardsTable, config.SchemaName, config.ProjectionShardsTable,
-		config.ProjectionShardsTable, config.SchemaName, config.ProjectionShardsTable,
-		config.SchemaName, config.RecreateLockTable,
-		config.SchemaName, config.RecreateLockTable,
-		config.RecreateLockTable, config.SchemaName, config.RecreateLockTable,
+		config.SchemaName, config.RecreateStateTable,
+		config.SchemaName, config.RecreateStateTable,
+		config.RecreateStateTable, config.SchemaName, config.RecreateStateTable,
 		config.SchemaName, config.WorkersTable,
 		config.WorkersTable, config.SchemaName, config.WorkersTable,
 		config.WorkersTable, config.SchemaName, config.WorkersTable,
@@ -228,53 +186,22 @@ CREATE DATABASE IF NOT EXISTS %s
 -- Switch to orchestrator database
 USE %s;
 
--- Projection shards table manages shard ownership and coordination for projections
--- Ensures each shard of a projection is owned by at most one worker at a time
--- Supports horizontal scaling by partitioning projection workload across shards
+-- Recreate state table coordinates recreate strategy deployments
+-- Singleton table (single row) that tracks current generation
+-- Ensures only one generation is active at a time
+-- Uses transactional CAS-style updates for generation advancement
 CREATE TABLE IF NOT EXISTS %s (
-    projection_name VARCHAR(255) NOT NULL,
-    shard_id INT NOT NULL,
-    shard_count INT NOT NULL,
-    last_global_position BIGINT NOT NULL DEFAULT 0,
-    owner_id VARCHAR(255),
-    state ENUM('idle', 'assigned', 'draining') NOT NULL DEFAULT 'idle',
+    state_id INT PRIMARY KEY DEFAULT 1,
+    current_generation BIGINT NOT NULL DEFAULT 0,
     updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     
-    PRIMARY KEY (projection_name, shard_id),
-    
-    -- Ensure shard_id is within valid range for shard_count
-    CHECK (shard_id >= 0 AND shard_id < shard_count)
+    CHECK (state_id = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Index for querying shards by state
-CREATE INDEX idx_%s_state 
-    ON %s (state, projection_name, shard_id);
-
--- Index for querying shards by owner
-CREATE INDEX idx_%s_owner 
-    ON %s (owner_id, projection_name);
-
--- Index for observability and monitoring
-CREATE INDEX idx_%s_updated 
-    ON %s (updated_at DESC);
-
--- Recreate lock table coordinates recreate strategy deployments
--- Singleton table (single row) that tracks deployment generation and phase
--- Prevents parallel deployments and ensures consistent state transitions
--- No advisory locks needed - uses standard transactional operations
-CREATE TABLE IF NOT EXISTS %s (
-    lock_id INT PRIMARY KEY DEFAULT 1,
-    generation BIGINT NOT NULL DEFAULT 0,
-    phase ENUM('idle', 'draining', 'assigning', 'running') NOT NULL DEFAULT 'idle',
-    updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-    
-    CHECK (lock_id = 1)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Initialize the singleton lock row
-INSERT INTO %s (lock_id, generation, phase, updated_at)
-VALUES (1, 0, 'idle', CURRENT_TIMESTAMP(6))
-ON DUPLICATE KEY UPDATE lock_id = lock_id;
+-- Initialize the singleton state row
+INSERT INTO %s (state_id, current_generation, updated_at)
+VALUES (1, 0, CURRENT_TIMESTAMP(6))
+ON DUPLICATE KEY UPDATE state_id = state_id;
 
 -- Index for observability
 CREATE INDEX idx_%s_updated 
@@ -305,13 +232,9 @@ CREATE INDEX idx_%s_generation
 		time.Now().Format(time.RFC3339),
 		config.SchemaName,
 		config.SchemaName,
-		config.ProjectionShardsTable,
-		config.ProjectionShardsTable, config.ProjectionShardsTable,
-		config.ProjectionShardsTable, config.ProjectionShardsTable,
-		config.ProjectionShardsTable, config.ProjectionShardsTable,
-		config.RecreateLockTable,
-		config.RecreateLockTable,
-		config.RecreateLockTable, config.RecreateLockTable,
+		config.RecreateStateTable,
+		config.RecreateStateTable,
+		config.RecreateStateTable, config.RecreateStateTable,
 		config.WorkersTable,
 		config.WorkersTable, config.WorkersTable,
 		config.WorkersTable, config.WorkersTable,
@@ -343,58 +266,26 @@ func GenerateSQLite(config *Config) error {
 
 func generateSQLiteSQL(config *Config) string {
 	// SQLite doesn't support schemas, so we use table name prefixes instead
-	projectionShardsTable := config.SchemaName + "_" + config.ProjectionShardsTable
-	recreateLockTable := config.SchemaName + "_" + config.RecreateLockTable
+	recreateStateTable := config.SchemaName + "_" + config.RecreateStateTable
 	workersTable := config.SchemaName + "_" + config.WorkersTable
 
 	return fmt.Sprintf(`-- Orchestrator Coordination Infrastructure Migration
 -- Generated: %s
 -- Database: SQLite
 
--- Projection shards table manages shard ownership and coordination for projections
--- Ensures each shard of a projection is owned by at most one worker at a time
--- Supports horizontal scaling by partitioning projection workload across shards
+-- Recreate state table coordinates recreate strategy deployments
+-- Singleton table (single row) that tracks current generation
+-- Ensures only one generation is active at a time
+-- Uses transactional CAS-style updates for generation advancement
 CREATE TABLE IF NOT EXISTS %s (
-    projection_name TEXT NOT NULL,
-    shard_id INTEGER NOT NULL,
-    shard_count INTEGER NOT NULL,
-    last_global_position INTEGER NOT NULL DEFAULT 0,
-    owner_id TEXT,
-    state TEXT NOT NULL DEFAULT 'idle' CHECK (state IN ('idle', 'assigned', 'draining')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    
-    PRIMARY KEY (projection_name, shard_id),
-    
-    -- Ensure shard_id is within valid range for shard_count
-    CHECK (shard_id >= 0 AND shard_id < shard_count)
-);
-
--- Index for querying shards by state
-CREATE INDEX IF NOT EXISTS idx_%s_state 
-    ON %s (state, projection_name, shard_id);
-
--- Index for querying shards by owner
-CREATE INDEX IF NOT EXISTS idx_%s_owner 
-    ON %s (owner_id, projection_name) WHERE owner_id IS NOT NULL;
-
--- Index for observability and monitoring
-CREATE INDEX IF NOT EXISTS idx_%s_updated 
-    ON %s (updated_at DESC);
-
--- Recreate lock table coordinates recreate strategy deployments
--- Singleton table (single row) that tracks deployment generation and phase
--- Prevents parallel deployments and ensures consistent state transitions
--- No advisory locks needed - uses standard transactional operations
-CREATE TABLE IF NOT EXISTS %s (
-    lock_id INTEGER PRIMARY KEY DEFAULT 1 CHECK (lock_id = 1),
-    generation INTEGER NOT NULL DEFAULT 0,
-    phase TEXT NOT NULL DEFAULT 'idle' CHECK (phase IN ('idle', 'draining', 'assigning', 'running')),
+    state_id INTEGER PRIMARY KEY DEFAULT 1 CHECK (state_id = 1),
+    current_generation INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Initialize the singleton lock row
-INSERT OR IGNORE INTO %s (lock_id, generation, phase, updated_at)
-VALUES (1, 0, 'idle', datetime('now'));
+-- Initialize the singleton state row
+INSERT OR IGNORE INTO %s (state_id, current_generation, updated_at)
+VALUES (1, 0, datetime('now'));
 
 -- Index for observability
 CREATE INDEX IF NOT EXISTS idx_%s_updated 
@@ -423,13 +314,9 @@ CREATE INDEX IF NOT EXISTS idx_%s_generation
     ON %s (generation_seen, worker_id);
 `,
 		time.Now().Format(time.RFC3339),
-		projectionShardsTable,
-		projectionShardsTable, projectionShardsTable,
-		projectionShardsTable, projectionShardsTable,
-		projectionShardsTable, projectionShardsTable,
-		recreateLockTable,
-		recreateLockTable,
-		recreateLockTable, recreateLockTable,
+		recreateStateTable,
+		recreateStateTable,
+		recreateStateTable, recreateStateTable,
 		workersTable,
 		workersTable, workersTable,
 		workersTable, workersTable,
