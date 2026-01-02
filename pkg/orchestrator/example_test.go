@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/getpup/pupsourcing-orchestrator/pkg/orchestrator"
+	"github.com/getpup/pupsourcing/es"
 )
 
 // ExampleProjection is a simple projection implementation for demonstration
@@ -15,6 +16,11 @@ type ExampleProjection struct {
 
 func (p *ExampleProjection) Name() string {
 	return p.name
+}
+
+//nolint:gocritic // hugeParam: Intentionally pass by value to enforce immutability
+func (p *ExampleProjection) Handle(_ context.Context, _ es.PersistedEvent) error {
+	return nil
 }
 
 // Example_basic demonstrates the basic usage of the orchestrator
@@ -45,22 +51,13 @@ func Example_basic() {
 	// Output will be logged but not captured in example output
 }
 
-// customLogger is a custom logger implementation
-type customLogger struct{}
-
-func (customLogger) Printf(format string, v ...interface{}) {
-	log.Printf("[ORCHESTRATOR] "+format, v...)
-}
-
-// Example_withCustomLogger demonstrates using a custom logger
-func Example_withCustomLogger() {
+// Example_withStrategy demonstrates creating a strategy
+func Example_withStrategy() {
 	// Create projection
 	p := &ExampleProjection{name: "my_projection"}
 
-	// Create strategy with custom logger
-	strategy := &orchestrator.RecreateStrategy{
-		Logger: customLogger{},
-	}
+	// Create strategy (currently no configuration options)
+	strategy := orchestrator.Recreate()
 
 	// Create orchestrator
 	orch, err := orchestrator.New(

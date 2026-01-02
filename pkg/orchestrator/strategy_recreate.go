@@ -16,33 +16,15 @@ import (
 //
 // This is the default and initially only supported strategy.
 type RecreateStrategy struct {
-	// Logger is an optional logger for observability.
-	// If nil, basic logging to stdout is used.
-	Logger Logger
-}
-
-// Logger is a simple logging interface.
-type Logger interface {
-	Printf(format string, v ...interface{})
-}
-
-// defaultLogger uses the standard log package.
-type defaultLogger struct{}
-
-func (defaultLogger) Printf(format string, v ...interface{}) {
-	log.Printf(format, v...)
+	// Note: Logger integration will be added in future iterations when
+	// the orchestrator integrates with pupsourcing's ProcessorRunner
 }
 
 // Run executes all projections sequentially until the context is canceled.
 // In the Recreate strategy, projections run in a simple sequential manner.
 // When the context is canceled, all projections are stopped gracefully.
 func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) error {
-	logger := s.Logger
-	if logger == nil {
-		logger = defaultLogger{}
-	}
-
-	logger.Printf("Starting Recreate strategy with %d projection(s)", len(projections))
+	log.Printf("Starting Recreate strategy with %d projection(s)", len(projections))
 
 	// For now, this is a placeholder implementation.
 	// The actual projection execution will be implemented later when we integrate
@@ -57,12 +39,12 @@ func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) er
 	// and actually run the projections using the ProcessorRunner interface.
 
 	for _, proj := range projections {
-		logger.Printf("Projection registered: %s", proj.Name())
+		log.Printf("Projection registered: %s", proj.Name())
 	}
 
 	// Wait for context cancellation
 	<-ctx.Done()
-	logger.Printf("Context canceled, stopping Recreate strategy")
+	log.Printf("Context canceled, stopping Recreate strategy")
 
 	return ctx.Err()
 }

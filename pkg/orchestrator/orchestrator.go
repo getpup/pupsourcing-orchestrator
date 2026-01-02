@@ -5,14 +5,13 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+
+	"github.com/getpup/pupsourcing/es/projection"
 )
 
-// Projection represents a projection that processes events.
-// This interface is compatible with github.com/getpup/pupsourcing/es/projection.Projection.
-type Projection interface {
-	// Name returns the unique name of this projection.
-	Name() string
-}
+// Projection is an alias for the projection interface from pupsourcing.
+// This allows users to work with pupsourcing projections directly.
+type Projection = projection.Projection
 
 // Orchestrator coordinates multiple projection workers safely and deterministically.
 // It manages lifecycle concerns such as startup, shutdown, restarts, and fault recovery.

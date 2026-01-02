@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/getpup/pupsourcing/es"
 )
 
 // mockProjection is a test implementation of Projection
@@ -14,6 +16,11 @@ type mockProjection struct {
 
 func (m *mockProjection) Name() string {
 	return m.name
+}
+
+//nolint:gocritic // hugeParam: Intentionally pass by value to enforce immutability
+func (m *mockProjection) Handle(_ context.Context, _ es.PersistedEvent) error {
+	return nil
 }
 
 // mockStrategy is a test implementation of Strategy

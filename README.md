@@ -44,23 +44,18 @@ import (
     "os/signal"
     "syscall"
 
+    "github.com/getpup/pupsourcing/es"
     "github.com/getpup/pupsourcing-orchestrator/pkg/orchestrator"
 )
 
-// Define your projection (compatible with pupsourcing projections)
-type MyProjection struct {
-    name string
-}
-
-func (p *MyProjection) Name() string {
-    return p.name
-}
+// Define your projections (compatible with pupsourcing projections)
+type MyProjection struct {}
 
 func main() {
-    // Create projections
-    p1 := &MyProjection{name: "user_read_model"}
-    p2 := &MyProjection{name: "order_analytics"}
-    p3 := &MyProjection{name: "inventory_tracker"}
+    // Create scoped projections that filter by aggregate type and bounded context
+    p1 := &UserReadModelProjection{}    // Scoped to User events in Identity context
+    p2 := &OrderAnalyticsProjection{}   // Scoped to Order events in Sales context  
+    p3 := &IntegrationPublisher{}       // Global projection - receives all events
 
     // Create orchestrator with Recreate strategy
     orch, err := orchestrator.New(
@@ -88,6 +83,60 @@ func main() {
     if err := orch.Run(ctx); err != nil && err != context.Canceled {
         log.Fatalf("Orchestrator error: %v", err)
     }
+}
+
+// UserReadModelProjection is a scoped projection that only processes User events
+type UserReadModelProjection struct{}
+
+func (p *UserReadModelProjection) Name() string {
+    return "user_read_model"
+}
+
+func (p *UserReadModelProjection) AggregateTypes() []string {
+    return []string{"User"}
+}
+
+func (p *UserReadModelProjection) BoundedContexts() []string {
+    return []string{"Identity"}
+}
+
+func (p *UserReadModelProjection) Handle(ctx context.Context, event es.PersistedEvent) error {
+    // Build read model from User events
+    return nil
+}
+
+// OrderAnalyticsProjection is a scoped projection for order analytics
+type OrderAnalyticsProjection struct{}
+
+func (p *OrderAnalyticsProjection) Name() string {
+    return "order_analytics"
+}
+
+func (p *OrderAnalyticsProjection) AggregateTypes() []string {
+    return []string{"Order"}
+}
+
+func (p *OrderAnalyticsProjection) BoundedContexts() []string {
+    return []string{"Sales"}
+}
+
+func (p *OrderAnalyticsProjection) Handle(ctx context.Context, event es.PersistedEvent) error {
+    // Analyze order data
+    return nil
+}
+
+// IntegrationPublisher is a global projection that publishes all events
+type IntegrationPublisher struct{}
+
+func (p *IntegrationPublisher) Name() string {
+    return "system.integration.publisher.v1"
+}
+
+// No AggregateTypes or BoundedContexts methods = receives ALL events
+
+func (p *IntegrationPublisher) Handle(ctx context.Context, event es.PersistedEvent) error {
+    // Publish to message broker
+    return nil
 }
 ```
 
