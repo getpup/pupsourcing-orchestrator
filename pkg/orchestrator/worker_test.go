@@ -189,7 +189,11 @@ func TestWorker_Start_RegistersWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start worker: %v", err)
 	}
-	defer worker.Stop(ctx)
+	defer func() {
+		if err := worker.Stop(ctx); err != nil {
+			t.Logf("Failed to stop worker: %v", err)
+		}
+	}()
 
 	persistence.mu.Lock()
 	record, exists := persistence.workers[worker.ID()]
@@ -248,7 +252,11 @@ func TestWorker_TransitionTo_UpdatesState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start worker: %v", err)
 	}
-	defer worker.Stop(ctx)
+	defer func() {
+		if err := worker.Stop(ctx); err != nil {
+			t.Logf("Failed to stop worker: %v", err)
+		}
+	}()
 
 	// Transition to ready
 	err = worker.TransitionTo(ctx, WorkerStateReady)
@@ -285,7 +293,11 @@ func TestWorker_TransitionTo_RollbackOnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start worker: %v", err)
 	}
-	defer worker.Stop(ctx)
+	defer func() {
+		if err := worker.Stop(ctx); err != nil {
+			t.Logf("Failed to stop worker: %v", err)
+		}
+	}()
 
 	initialState := worker.State()
 
@@ -324,7 +336,9 @@ func TestWorker_HeartbeatLoop_UpdatesPeriodically(t *testing.T) {
 	// Wait for several heartbeats
 	time.Sleep(200 * time.Millisecond)
 
-	worker.Stop(ctx)
+	if err := worker.Stop(ctx); err != nil {
+		t.Fatalf("Failed to stop worker: %v", err)
+	}
 
 	persistence.mu.Lock()
 	callCount := persistence.heartbeatCallCount
@@ -352,7 +366,11 @@ func TestWorker_ObserveGeneration_UpdatesGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start worker: %v", err)
 	}
-	defer worker.Stop(ctx)
+	defer func() {
+		if err := worker.Stop(ctx); err != nil {
+			t.Logf("Failed to stop worker: %v", err)
+		}
+	}()
 
 	initialGen := worker.GenerationSeen()
 
