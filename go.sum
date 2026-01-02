@@ -1,0 +1,4 @@
+github.com/getpup/pupsourcing v0.0.0-20251229185453-06e02ffc23ee h1:9WUjXGRxXSmtSg29fQAGNKFPhC5BOoCJqYpsD9W3wis=
+github.com/getpup/pupsourcing v0.0.0-20251229185453-06e02ffc23ee/go.mod h1:Mo/JSn6UGdwdwTWfX5j98U6qqalBju8CfRrP2RBoLEU=
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
