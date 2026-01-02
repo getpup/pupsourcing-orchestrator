@@ -242,6 +242,81 @@ The orchestrator follows clean architecture principles:
 - Dependencies point inward (infrastructure depends on domain, not vice versa)
 - Public API is minimal and focused
 
+## Database Schema Migration
+
+The orchestrator requires database tables for coordination. Use the `migrate-gen` command to generate SQL migration files for your database.
+
+### Generate Migrations
+
+```bash
+# Generate PostgreSQL migration
+go run github.com/getpup/pupsourcing-orchestrator/cmd/migrate-gen \
+  -adapter postgres \
+  -output migrations
+
+# Generate MySQL/MariaDB migration
+go run github.com/getpup/pupsourcing-orchestrator/cmd/migrate-gen \
+  -adapter mysql \
+  -output migrations
+
+# Generate SQLite migration
+go run github.com/getpup/pupsourcing-orchestrator/cmd/migrate-gen \
+  -adapter sqlite \
+  -output migrations
+```
+
+Or use `go generate`:
+
+```go
+//go:generate go run github.com/getpup/pupsourcing-orchestrator/cmd/migrate-gen -adapter postgres -output migrations
+```
+
+Then run:
+
+```bash
+go generate ./...
+```
+
+### Migration Options
+
+- `-adapter`: Database adapter (postgres, mysql, sqlite)
+- `-output`: Output folder for migration files (default: migrations)
+- `-filename`: Custom filename for the migration (default: timestamp-based)
+- `-schema`: Schema name for PostgreSQL or database name for MySQL (default: orchestrator)
+- `-projection-shards-table`: Custom name for projection shards table (default: projection_shards)
+- `-recreate-lock-table`: Custom name for recreate lock table (default: recreate_lock)
+- `-workers-table`: Custom name for workers table (default: workers)
+
+### Generated Tables
+
+The migration creates three coordination tables:
+
+1. **projection_shards** - Manages shard ownership and coordination for projections
+   - Ensures each shard is owned by at most one worker
+   - Tracks global position for each shard
+   - Supports horizontal scaling by partitioning workload
+
+2. **recreate_lock** - Coordinates recreate strategy deployments
+   - Singleton table tracking deployment generation and phase
+   - Prevents parallel deployments using transactional operations
+   - No advisory locks required
+
+3. **workers** - Tracks worker heartbeats and status
+   - Enables worker discovery and health monitoring
+   - Detects worker failures through stale heartbeats
+   - Manages worker lifecycle states
+
+### Schema Requirements
+
+- **PostgreSQL**: Creates a schema (default: `orchestrator`) and tables within it
+- **MySQL/MariaDB**: Creates a database (default: `orchestrator`) and tables within it
+- **SQLite**: Uses table name prefixes (e.g., `orchestrator_projection_shards`)
+
+All operations use standard transactional SQL without requiring:
+- Advisory locks
+- SERIALIZABLE isolation level
+- Database-specific extensions
+
 ## Build
 
 ```bash
