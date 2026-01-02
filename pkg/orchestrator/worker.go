@@ -10,6 +10,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	// DefaultHeartbeatInterval is the default time between worker heartbeats
+	DefaultHeartbeatInterval = 5 * time.Second
+
+	// DefaultStaleWorkerThreshold is the default duration after which a worker is considered stale
+	DefaultStaleWorkerThreshold = 30 * time.Second
+
+	// DefaultCleanupTimeout is the default timeout for cleanup operations
+	DefaultCleanupTimeout = 5 * time.Second
+)
+
 // WorkerState represents the current state of a worker in the lifecycle
 type WorkerState string
 
@@ -77,7 +88,7 @@ func NewWorker(config WorkerConfig) (*Worker, error) {
 	}
 
 	if config.HeartbeatInterval == 0 {
-		config.HeartbeatInterval = 5 * time.Second
+		config.HeartbeatInterval = DefaultHeartbeatInterval
 	}
 
 	// Generate stable worker ID using hostname + UUID
@@ -183,7 +194,7 @@ func (w *Worker) Stop(ctx context.Context) error {
 	// Wait for heartbeat to finish with timeout
 	select {
 	case <-w.heartbeatDone:
-	case <-time.After(5 * time.Second):
+	case <-time.After(DefaultCleanupTimeout):
 		// Timeout waiting for heartbeat to stop
 	}
 
@@ -230,8 +241,7 @@ func CleanupStaleWorkers(ctx context.Context, adapter WorkerPersistenceAdapter, 
 	}
 
 	if staleThreshold == 0 {
-		// Default to 30 seconds if not specified
-		staleThreshold = 30 * time.Second
+		staleThreshold = DefaultStaleWorkerThreshold
 	}
 
 	return adapter.DeleteStaleWorkers(ctx, staleThreshold)

@@ -54,7 +54,7 @@ func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) er
 		// Cleanup stale workers from previous deployments
 		staleThreshold := s.StaleWorkerThreshold
 		if staleThreshold == 0 {
-			staleThreshold = 30 * time.Second
+			staleThreshold = DefaultStaleWorkerThreshold
 		}
 
 		if err := CleanupStaleWorkers(ctx, s.WorkerConfig.PersistenceAdapter, staleThreshold); err != nil {
@@ -70,7 +70,7 @@ func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) er
 		// Defer cleanup
 		defer func() {
 			if worker != nil {
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), DefaultCleanupTimeout)
 				defer cancel()
 				if err := worker.Stop(cleanupCtx); err != nil {
 					log.Printf("Warning: failed to stop worker cleanly: %v", err)
@@ -107,7 +107,7 @@ func (s *RecreateStrategy) Run(ctx context.Context, projections []Projection) er
 
 	// Transition to draining state if worker is active
 	if worker != nil {
-		drainingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		drainingCtx, cancel := context.WithTimeout(context.Background(), DefaultCleanupTimeout)
 		defer cancel()
 		if err := worker.TransitionTo(drainingCtx, WorkerStateDraining); err != nil {
 			log.Printf("Warning: failed to transition to draining state: %v", err)

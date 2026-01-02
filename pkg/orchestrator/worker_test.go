@@ -167,8 +167,8 @@ func TestNewWorker_DefaultHeartbeatInterval(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	if worker.heartbeatInterval != 5*time.Second {
-		t.Errorf("Expected default heartbeat interval to be 5s, got: %v", worker.heartbeatInterval)
+	if worker.heartbeatInterval != DefaultHeartbeatInterval {
+		t.Errorf("Expected default heartbeat interval to be %v, got: %v", DefaultHeartbeatInterval, worker.heartbeatInterval)
 	}
 }
 
