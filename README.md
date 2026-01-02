@@ -8,7 +8,7 @@ pupsourcing-orchestrator is a companion library to [pupsourcing](https://github.
 
 Its core responsibility is to coordinate multiple projection workers safely and deterministically, using a shared database for coordination. It manages lifecycle concerns such as startup, shutdown, restarts, and fault recovery, while ensuring each event is processed exactly once per projection.
 
-The orchestrator enables horizontal scaling without requiring users to manually partition streams or assign shards. Multiple identical workers can be started, and the orchestrator ensures only one worker owns a given projection at a time.
+The orchestrator enables simple and reliable projection execution. Multiple identical workers can be started, and the orchestrator uses a generation-based approach to ensure safe deployments where only one generation of workers is active at a time.
 
 pupsourcing-orchestrator is intentionally not a framework. It does not own domain logic, storage schemas, or event definitions. Instead, it focuses purely on orchestration, coordination, and operational correctness for projection execution.
 
@@ -170,25 +170,36 @@ The Recreate strategy is a simple orchestration approach where all projections a
 
 **Characteristics:**
 - Simple and predictable
-- Guaranteed consistency (no parallel execution of same projection)
-- Downtime during updates (all instances stopped before new ones start)
-- Worker identity and lifecycle management
+- Guaranteed consistency (no parallel execution across generations)
+- Downtime during updates (old generation stopped before new one starts)
+- Generation-based coordination ensures only one active generation at a time
+- Worker identity and lifecycle management (optional)
 - Automatic cleanup of stale workers
 - Heartbeat-based health monitoring
+
+**Generation-Based Coordination:**
+
+The Recreate strategy operates on generations. At any time, there is exactly ONE active generation:
+- Each deployment creates a new generation
+- Workers from previous generations are stopped before new ones start
+- Generation advancement uses CAS-style updates to prevent conflicts
+- Multiple workers starting simultaneously will race, and only one advances the generation
 
 **Usage:**
 
 ```go
-// Basic usage without worker management
+// Basic usage without persistence
 strategy := orchestrator.Recreate()
 
-// With worker lifecycle management
-persistence := &MyWorkerPersistence{} // Implement WorkerPersistenceAdapter
+// With generation coordination and worker lifecycle management
+recreatePersistence := &MyRecreatePersistence{} // Implement RecreatePersistenceAdapter
+workerPersistence := &MyWorkerPersistence{}     // Implement WorkerPersistenceAdapter
 
 strategy := &orchestrator.RecreateStrategy{
+    RecreatePersistence: recreatePersistence,
     WorkerConfig: orchestrator.WorkerConfig{
         HeartbeatInterval:  5 * time.Second,
-        PersistenceAdapter: persistence,
+        PersistenceAdapter: workerPersistence,
     },
     StaleWorkerThreshold: 30 * time.Second,
     Logger:               myLogger, // Optional: inject es.Logger for observability
@@ -221,6 +232,22 @@ The system recovers via:
 - Stale worker detection based on last heartbeat timestamp
 - Automatic cleanup during Recreate strategy initialization
 - Default stale threshold: 30 seconds (configurable)
+
+**RecreatePersistenceAdapter Interface:**
+
+To enable generation coordination, implement the `RecreatePersistenceAdapter` interface:
+
+```go
+type RecreatePersistenceAdapter interface {
+    // GetCurrentGeneration retrieves the current generation number
+    GetCurrentGeneration(ctx context.Context) (int64, error)
+
+    // AdvanceGeneration attempts to increment the generation using CAS-style update.
+    // Returns the new generation number on success.
+    // If expectedCurrent doesn't match the current generation, returns an error.
+    AdvanceGeneration(ctx context.Context, expectedCurrent int64) (int64, error)
+}
+```
 
 **WorkerPersistenceAdapter Interface:**
 
@@ -276,9 +303,13 @@ This interface is compatible with `github.com/getpup/pupsourcing/es/projection.P
 
 ## Design Principles
 
-### No Partition/Shard Configuration
+### Generation-Based Coordination
 
-The orchestrator does not expose partition or shard configuration to users. This complexity is handled internally by the coordination layer. Users simply provide projections, and the orchestrator ensures they run correctly.
+The Recreate strategy uses generation-based coordination rather than shard-based partitioning. This means:
+- At any time, only ONE generation of workers is active
+- Deployments create a new generation, stopping all workers from the previous generation
+- No complex partition assignment or rebalancing logic
+- Simple, predictable behavior that's easy to reason about
 
 ### No Event-Store-Specific Logic
 
@@ -338,34 +369,30 @@ go generate ./...
 - `-output`: Output folder for migration files (default: migrations)
 - `-filename`: Custom filename for the migration (default: timestamp-based)
 - `-schema`: Schema name for PostgreSQL or database name for MySQL (default: orchestrator)
-- `-projection-shards-table`: Custom name for projection shards table (default: projection_shards)
-- `-recreate-lock-table`: Custom name for recreate lock table (default: recreate_lock)
+- `-recreate-state-table`: Custom name for recreate state table (default: recreate_state)
 - `-workers-table`: Custom name for workers table (default: workers)
 
 ### Generated Tables
 
-The migration creates three coordination tables:
+The migration creates two coordination tables:
 
-1. **projection_shards** - Manages shard ownership and coordination for projections
-   - Ensures each shard is owned by at most one worker
-   - Tracks global position for each shard
-   - Supports horizontal scaling by partitioning workload
-
-2. **recreate_lock** - Coordinates recreate strategy deployments
-   - Singleton table tracking deployment generation and phase
-   - Prevents parallel deployments using transactional operations
+1. **recreate_state** - Coordinates recreate strategy deployments
+   - Singleton table tracking the current generation
+   - Uses transactional CAS-style updates for generation advancement
+   - Prevents parallel deployments and ensures only one generation is active
    - No advisory locks required
 
-3. **workers** - Tracks worker heartbeats and status
+2. **workers** - Tracks worker heartbeats and status
    - Enables worker discovery and health monitoring
    - Detects worker failures through stale heartbeats
    - Manages worker lifecycle states
+   - Tracks which generation each worker belongs to
 
 ### Schema Requirements
 
 - **PostgreSQL**: Creates a schema (default: `orchestrator`) and tables within it
 - **MySQL/MariaDB**: Creates a database (default: `orchestrator`) and tables within it
-- **SQLite**: Uses table name prefixes (e.g., `orchestrator_projection_shards`)
+- **SQLite**: Uses table name prefixes (e.g., `orchestrator_recreate_state`, `orchestrator_workers`)
 
 All operations use standard transactional SQL without requiring:
 - Advisory locks

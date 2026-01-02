@@ -361,130 +361,129 @@ func TestRecreateStrategy_WithoutWorker_WorksNormally(t *testing.T) {
 }
 
 func TestRecreateStrategy_WithGeneration_AdvancesGeneration(t *testing.T) {
-recreatePersistence := newMockRecreatePersistence()
+	recreatePersistence := newMockRecreatePersistence()
 
-strategy := &RecreateStrategy{
-RecreatePersistence: recreatePersistence,
-}
+	strategy := &RecreateStrategy{
+		RecreatePersistence: recreatePersistence,
+	}
 
-proj := &mockTestProjection{name: "test"}
-projections := []Projection{proj}
+	proj := &mockTestProjection{name: "test"}
+	projections := []Projection{proj}
 
-ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 
-done := make(chan error, 1)
-go func() {
-done <- strategy.Run(ctx, projections)
-}()
+	done := make(chan error, 1)
+	go func() {
+		done <- strategy.Run(ctx, projections)
+	}()
 
-// Give strategy time to advance generation
-time.Sleep(50 * time.Millisecond)
+	// Give strategy time to advance generation
+	time.Sleep(50 * time.Millisecond)
 
-// Check that generation was advanced
-recreatePersistence.mu.Lock()
-currentGen := recreatePersistence.currentGeneration
-advanceCalls := recreatePersistence.advanceCallCount
-recreatePersistence.mu.Unlock()
+	// Check that generation was advanced
+	recreatePersistence.mu.Lock()
+	currentGen := recreatePersistence.currentGeneration
+	advanceCalls := recreatePersistence.advanceCallCount
+	recreatePersistence.mu.Unlock()
 
-if currentGen != 1 {
-t.Errorf("Expected generation to be 1, got: %d", currentGen)
-}
+	if currentGen != 1 {
+		t.Errorf("Expected generation to be 1, got: %d", currentGen)
+	}
 
-if advanceCalls != 1 {
-t.Errorf("Expected AdvanceGeneration to be called once, got: %d", advanceCalls)
-}
+	if advanceCalls != 1 {
+		t.Errorf("Expected AdvanceGeneration to be called once, got: %d", advanceCalls)
+	}
 
-cancel()
+	cancel()
 
-select {
-case <-done:
-case <-time.After(1 * time.Second):
-t.Fatal("Run did not complete in time")
-}
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("Run did not complete in time")
+	}
 }
 
 func TestRecreateStrategy_WithGeneration_FailsOnCASConflict(t *testing.T) {
-recreatePersistence := newMockRecreatePersistence()
+	recreatePersistence := newMockRecreatePersistence()
 
-// Simulate race condition: set mock to expect different generation
-recreatePersistence.mu.Lock()
-recreatePersistence.currentGeneration = 5
-recreatePersistence.expectedCurrentOnCAS = 3 // Force CAS to fail
-recreatePersistence.mu.Unlock()
+	// Simulate race condition: set mock to expect different generation
+	recreatePersistence.mu.Lock()
+	recreatePersistence.currentGeneration = 5
+	recreatePersistence.expectedCurrentOnCAS = 3 // Force CAS to fail
+	recreatePersistence.mu.Unlock()
 
-strategy := &RecreateStrategy{
-RecreatePersistence: recreatePersistence,
-}
+	strategy := &RecreateStrategy{
+		RecreatePersistence: recreatePersistence,
+	}
 
-proj := &mockTestProjection{name: "test"}
-projections := []Projection{proj}
+	proj := &mockTestProjection{name: "test"}
+	projections := []Projection{proj}
 
-ctx := context.Background()
+	ctx := context.Background()
 
-err := strategy.Run(ctx, projections)
+	err := strategy.Run(ctx, projections)
 
-// Should fail because CAS will fail (expected 3 but got 5)
-if err == nil {
-t.Fatal("Expected error from CAS conflict, got nil")
-}
+	// Should fail because CAS will fail (expected 3 but got 5)
+	if err == nil {
+		t.Fatal("Expected error from CAS conflict, got nil")
+	}
 }
 
 func TestRecreateStrategy_WithGenerationAndWorker_UpdatesWorkerGeneration(t *testing.T) {
-recreatePersistence := newMockRecreatePersistence()
-workerPersistence := newMockWorkerPersistence()
+	recreatePersistence := newMockRecreatePersistence()
+	workerPersistence := newMockWorkerPersistence()
 
-workerConfig := WorkerConfig{
-HeartbeatInterval:  100 * time.Millisecond,
-PersistenceAdapter: workerPersistence,
+	workerConfig := WorkerConfig{
+		HeartbeatInterval:  100 * time.Millisecond,
+		PersistenceAdapter: workerPersistence,
+	}
+
+	strategy := &RecreateStrategy{
+		RecreatePersistence:  recreatePersistence,
+		WorkerConfig:         workerConfig,
+		StaleWorkerThreshold: 30 * time.Second,
+	}
+
+	proj := &mockTestProjection{name: "test"}
+	projections := []Projection{proj}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- strategy.Run(ctx, projections)
+	}()
+
+	// Give strategy time to start and advance generation
+	time.Sleep(150 * time.Millisecond)
+
+	// Check that generation was advanced
+	recreatePersistence.mu.Lock()
+	currentGen := recreatePersistence.currentGeneration
+	recreatePersistence.mu.Unlock()
+
+	if currentGen != 1 {
+		t.Errorf("Expected generation to be 1, got: %d", currentGen)
+	}
+
+	// Check that worker sees the new generation
+	workerPersistence.mu.Lock()
+	var workerGen int64
+	for _, record := range workerPersistence.workers {
+		workerGen = record.generation
+		break
+	}
+	workerPersistence.mu.Unlock()
+
+	if workerGen != 1 {
+		t.Errorf("Expected worker generation to be 1, got: %d", workerGen)
+	}
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not complete in time")
+	}
 }
-
-strategy := &RecreateStrategy{
-RecreatePersistence:  recreatePersistence,
-WorkerConfig:         workerConfig,
-StaleWorkerThreshold: 30 * time.Second,
-}
-
-proj := &mockTestProjection{name: "test"}
-projections := []Projection{proj}
-
-ctx, cancel := context.WithCancel(context.Background())
-
-done := make(chan error, 1)
-go func() {
-done <- strategy.Run(ctx, projections)
-}()
-
-// Give strategy time to start and advance generation
-time.Sleep(150 * time.Millisecond)
-
-// Check that generation was advanced
-recreatePersistence.mu.Lock()
-currentGen := recreatePersistence.currentGeneration
-recreatePersistence.mu.Unlock()
-
-if currentGen != 1 {
-t.Errorf("Expected generation to be 1, got: %d", currentGen)
-}
-
-// Check that worker sees the new generation
-workerPersistence.mu.Lock()
-var workerGen int64
-for _, record := range workerPersistence.workers {
-workerGen = record.generation
-break
-}
-workerPersistence.mu.Unlock()
-
-if workerGen != 1 {
-t.Errorf("Expected worker generation to be 1, got: %d", workerGen)
-}
-
-cancel()
-
-select {
-case <-done:
-case <-time.After(2 * time.Second):
-t.Fatal("Run did not complete in time")
-}
-}
-
