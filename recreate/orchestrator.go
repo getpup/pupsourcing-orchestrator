@@ -31,6 +31,10 @@ type Config struct {
 	// ReplicaSet is the name of the replica set this orchestrator manages (required).
 	ReplicaSet orchestrator.ReplicaSetName
 
+	// Executor is an optional custom executor for running projections.
+	// If nil, a default executor is created using DB and EventStore.
+	Executor executor.Runner
+
 	// HeartbeatInterval is the interval between heartbeats (default: 5s).
 	HeartbeatInterval time.Duration
 
@@ -59,7 +63,7 @@ type Orchestrator struct {
 	config      Config
 	lifecycle   *lifecycle.Manager
 	coordinator *coordinator.Coordinator
-	executor    *executor.Executor
+	executor    executor.Runner
 }
 
 // New creates a new Orchestrator with the given configuration.
@@ -101,13 +105,18 @@ func New(cfg Config) *Orchestrator {
 		Logger:              cfg.Logger,
 	}, cfg.ReplicaSet)
 
-	// Create executor
-	exec := executor.New(executor.Config{
-		DB:         cfg.DB,
-		EventStore: cfg.EventStore,
-		BatchSize:  cfg.BatchSize,
-		Logger:     cfg.Logger,
-	})
+	// Create or use provided executor
+	var exec executor.Runner
+	if cfg.Executor != nil {
+		exec = cfg.Executor
+	} else {
+		exec = executor.New(executor.Config{
+			DB:         cfg.DB,
+			EventStore: cfg.EventStore,
+			BatchSize:  cfg.BatchSize,
+			Logger:     cfg.Logger,
+		})
+	}
 
 	return &Orchestrator{
 		config:      cfg,

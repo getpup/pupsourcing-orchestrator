@@ -32,6 +32,9 @@ type Executor struct {
 	config Config
 }
 
+// Compile-time check that Executor implements Runner.
+var _ Runner = (*Executor)(nil)
+
 // New creates a new Executor with the given configuration.
 // It applies default values for BatchSize if zero.
 func New(cfg Config) *Executor {
