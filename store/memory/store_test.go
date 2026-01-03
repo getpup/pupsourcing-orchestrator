@@ -465,3 +465,14 @@ func TestErrorCases(t *testing.T) {
 		assert.ErrorIs(t, err, store.ErrGenerationNotFound)
 	})
 }
+
+func TestRegisterWorker_InvalidGenerationID(t *testing.T) {
+	s := New()
+	ctx := context.Background()
+	replicaSet := orchestrator.ReplicaSetName("main-projections")
+
+	_, err := s.RegisterWorker(ctx, replicaSet, "non-existent-generation")
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, store.ErrGenerationNotFound)
+}

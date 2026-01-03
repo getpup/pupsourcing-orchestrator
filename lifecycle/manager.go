@@ -52,7 +52,10 @@ func (m *Manager) Register(ctx context.Context, replicaSet orchestrator.ReplicaS
 }
 
 // StartHeartbeat runs a heartbeat loop until the context is cancelled.
-// Sends heartbeats at the configured interval and logs if a logger is provided.
+// Note: A heartbeat failure immediately stops the loop and returns the error.
+// This is intentional as heartbeat failures typically indicate the worker
+// should stop (e.g., network partition, database unavailable). The orchestrator
+// is responsible for handling retries at a higher level.
 func (m *Manager) StartHeartbeat(ctx context.Context) error {
 	ticker := time.NewTicker(m.config.HeartbeatInterval)
 	defer ticker.Stop()
