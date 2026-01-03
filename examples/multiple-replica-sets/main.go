@@ -11,10 +11,10 @@ import (
 
 	_ "github.com/lib/pq"
 
+	"github.com/getpup/pupsourcing-orchestrator/pkg/orchestrator"
 	"github.com/getpup/pupsourcing/es"
 	"github.com/getpup/pupsourcing/es/adapters/postgres"
 	"github.com/getpup/pupsourcing/es/projection"
-	"github.com/getpup/pupsourcing-orchestrator/pkg/orchestrator"
 )
 
 // UserProjection is an example projection for the main replica set
@@ -47,10 +47,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer db.Close()
 
 	// Run migrations (only needs to be done once)
 	if err := orchestrator.RunMigrations(db); err != nil {
+		_ = db.Close()
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 
@@ -64,6 +64,7 @@ func main() {
 		ReplicaSet: "main-projections",
 	})
 	if err != nil {
+		_ = db.Close()
 		log.Fatalf("Failed to create main orchestrator: %v", err)
 	}
 
@@ -74,8 +75,16 @@ func main() {
 		ReplicaSet: "analytics-projections",
 	})
 	if err != nil {
+		_ = db.Close()
 		log.Fatalf("Failed to create analytics orchestrator: %v", err)
 	}
+
+	// Ensure database is closed on exit
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}()
 
 	// Define projections for each replica set
 	mainProjections := []projection.Projection{
