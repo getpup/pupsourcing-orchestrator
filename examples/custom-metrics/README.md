@@ -40,11 +40,11 @@ import (
 )
 
 // Orchestrator metrics are automatically registered
-orch, _ := orchestrator.New(orchestrator.Config{
-    DB:         db,
-    EventStore: eventStore,
-    ReplicaSet: "main-projections",
-})
+orch, _ := orchestrator.New(
+    orchestrator.WithDatabase(db),
+    orchestrator.WithEventStore(eventStore),
+    orchestrator.WithReplicaSet("main-projections"),
+)
 
 // Serve all metrics (including orchestrator metrics)
 http.Handle("/metrics", promhttp.Handler())

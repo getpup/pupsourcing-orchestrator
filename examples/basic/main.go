@@ -50,11 +50,11 @@ func main() {
 	}
 
 	// Create orchestrator
-	orch, err := orchestrator.New(orchestrator.Config{
-		DB:         db,
-		EventStore: eventStore,
-		ReplicaSet: "main-projections",
-	})
+	orch, err := orchestrator.New(
+		orchestrator.WithDatabase(db),
+		orchestrator.WithEventStore(eventStore),
+		orchestrator.WithReplicaSet("main-projections"),
+	)
 	if err != nil {
 		_ = db.Close()
 		log.Fatalf("Failed to create orchestrator: %v", err)
