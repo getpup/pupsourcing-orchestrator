@@ -9,7 +9,7 @@ reconfigure partition assignments, and restart together.
 ## Key Concepts
 
 ### Replica Set
-A **Replica Set** is a named group of projections that scale together. Each replica set:
+A **Replica Set** is a named group of projections that scale together. Each replica set: 
 - Has a unique name (e.g., "main-projections", "analytics-projections")
 - Contains one or more projections
 - Scales independently of other replica sets
@@ -54,31 +54,33 @@ Phase 5: Integration (after Phase 4)
 Phase 6: Polish (after Phase 5)
 - Task 12: Public API & Documentation
 - Task 13: CI/CD Setup
+- Task 14: Metrics and Observability
+- Task 15: Usage Examples (documentation only)
 
 ## Recreate Strategy Flow
 
-Initial state: No workers
+Initial state:  No workers
 
 Worker A starts:
-1. A registers, becomes partition 0 of 1
-2. A creates processors with TotalPartitions=1, PartitionKey=0
-3. A runs projections
+  1. A registers, becomes partition 0 of 1
+  2. A creates processors with TotalPartitions=1, PartitionKey=0
+  3. A runs projections
 
 Worker B starts:
-1. B registers, signals "pending"
-2. Coordinator detects change, creates new generation (2 partitions)
-3. A receives "generation superseded" signal, stops processors
-4. A and B coordinate:  A gets partition 0, B gets partition 1
-5. Both create processors with TotalPartitions=2
-6. Both mark "ready"
-7. Coordinator confirms all ready, signals "go"
-8. Both start running
+  1. B registers, signals "pending"
+  2. Coordinator detects change, creates new generation (2 partitions)
+  3. A receives "generation superseded" signal, stops processors
+  4. A and B coordinate:  A gets partition 0, B gets partition 1
+  5. Both create processors with TotalPartitions=2
+  6. Both mark "ready"
+  7. Coordinator confirms all ready, signals "go"
+  8. Both start running
 
 Worker C starts:
-1. Same process:  all pause, reconfigure to 3 partitions, restart together
+  1. Same process:  all pause, reconfigure to 3 partitions, restart together
 
 Worker B crashes:
-1. B's heartbeat stops
-2. After timeout, coordinator marks B as dead
-3. New generation created with 2 partitions (A and C)
-4. A and C stop, reconfigure, restart
+  1. B's heartbeat stops
+  2. After timeout, coordinator marks B as dead
+  3. New generation created with 2 partitions (A and C)
+  4. A and C stop, reconfigure, restart
