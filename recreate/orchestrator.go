@@ -160,13 +160,13 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 			}
 		}
 
-		// 2. Join or create generation
+		// 2. Get or create generation (without triggering reconfiguration yet)
 		generation, err := o.coordinator.JoinOrCreate(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to join generation: %w", err)
 		}
 
-		// 3. Register this worker
+		// 3. Register this worker in the generation
 		workerID, err := o.lifecycle.Register(ctx, o.config.ReplicaSet, generation.ID)
 		if err != nil {
 			return fmt.Errorf("failed to register worker: %w", err)
@@ -175,21 +175,52 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 			o.collector.IncWorkersRegistered()
 		}
 
-		// 4. Start heartbeat in background
+		// 4. Now check if reconfiguration is needed (with this worker registered)
+		shouldReconfig, err := o.coordinator.ShouldTriggerReconfiguration(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to check reconfiguration: %w", err)
+		}
+
+		if shouldReconfig {
+			// Wait briefly to allow other workers starting simultaneously to register
+			time.Sleep(o.config.RegistrationWaitTime)
+			
+			// Trigger reconfiguration - this creates a new generation
+			newGen, err := o.coordinator.TriggerReconfiguration(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to trigger reconfiguration: %w", err)
+			}
+			
+			if o.config.Logger != nil {
+				o.config.Logger.Info(ctx, "reconfiguration triggered after registration",
+					"oldGenerationID", generation.ID,
+					"newGenerationID", newGen.ID)
+			}
+			
+			// Mark self as stopped in old generation and loop back to join new one
+			if err := o.lifecycle.UpdateState(ctx, orchestrator.WorkerStateStopped); err != nil {
+				if o.config.Logger != nil {
+					o.config.Logger.Error(ctx, "failed to update state to stopped", "error", err)
+				}
+			}
+			continue
+		}
+
+		// 5. Start heartbeat in background
 		heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 		heartbeatDone := make(chan error, 1)
 		go func() {
 			heartbeatDone <- o.lifecycle.StartHeartbeat(heartbeatCtx)
 		}()
 
-		// 5. Check if this worker is the leader
+		// 6. Check if this worker is the leader
 		isLeader, err := o.coordinator.IsLeader(ctx, generation.ID, workerID)
 		if err != nil {
 			cancelHeartbeat()
 			return fmt.Errorf("failed to check leader status: %w", err)
 		}
 
-		// 6. If leader, wait for expected workers then assign partitions
+		// 7. If leader, wait for expected workers then assign partitions
 		if isLeader {
 			// Wait for expected number of workers to register
 			if err := o.coordinator.WaitForExpectedWorkers(ctx, generation.ID); err != nil {
@@ -208,14 +239,14 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 			}
 		}
 
-		// 7. Wait for partition assignment
+		// 8. Wait for partition assignment
 		assignment, err := o.coordinator.WaitForPartitionAssignment(ctx, workerID)
 		if err != nil {
 			cancelHeartbeat()
 			return fmt.Errorf("failed to get partition assignment: %w", err)
 		}
 
-		// 8. Mark self as ready
+		// 9. Mark self as ready
 		if err := o.lifecycle.UpdateState(ctx, orchestrator.WorkerStateReady); err != nil {
 			cancelHeartbeat()
 			return fmt.Errorf("failed to update state to ready: %w", err)
@@ -224,7 +255,7 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 		// Track start of coordination
 		coordinationStart := time.Now()
 
-		// 9. Wait for all workers to be ready
+		// 10. Wait for all workers to be ready
 		err = o.coordinator.WaitForAllReady(ctx, generation.ID)
 		if err != nil {
 			cancelHeartbeat()
@@ -237,28 +268,28 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 			o.collector.SetCurrentGenerationPartitions(generation.TotalPartitions)
 		}
 
-		// 10. Mark self as running
+		// 11. Mark self as running
 		if err := o.lifecycle.UpdateState(ctx, orchestrator.WorkerStateRunning); err != nil {
 			cancelHeartbeat()
 			return fmt.Errorf("failed to update state to running: %w", err)
 		}
 
-		// 11. Create execution context that can be cancelled on generation change
+		// 12. Create execution context that can be cancelled on generation change
 		execCtx, cancelExec := context.WithCancel(ctx)
 
-		// 12. Watch for generation changes in background
+		// 13. Watch for generation changes in background
 		watchDone := make(chan error, 1)
 		go func() {
 			watchDone <- o.coordinator.WatchGeneration(execCtx, generation.ID)
 		}()
 
-		// 13. Run projections
+		// 14. Run projections
 		execDone := make(chan error, 1)
 		go func() {
 			execDone <- o.executor.Run(execCtx, projections, assignment)
 		}()
 
-		// 14. Wait for either execution to complete or generation to change
+		// 15. Wait for either execution to complete or generation to change
 		var runErr error
 		select {
 		case runErr = <-execDone:

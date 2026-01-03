@@ -135,7 +135,7 @@ func (c *Coordinator) ShouldTriggerReconfiguration(ctx context.Context) (bool, e
 }
 
 // TriggerReconfiguration creates a new generation with the correct number of partitions.
-// It counts workers from the current generation (non-stopped, non-stale) to determine partition count.
+// It counts active (non-stale) workers + pending workers to determine partition count.
 // Returns the new generation.
 func (c *Coordinator) TriggerReconfiguration(ctx context.Context) (orchestrator.Generation, error) {
 	// Clean up stale workers first
@@ -143,18 +143,13 @@ func (c *Coordinator) TriggerReconfiguration(ctx context.Context) (orchestrator.
 		return orchestrator.Generation{}, fmt.Errorf("failed to cleanup stale workers: %w", err)
 	}
 
-	// Get the current active generation to count its workers
-	currentGen, err := c.config.Store.GetActiveGeneration(ctx, c.replicaSet)
+	// Count active workers (will be the new partition count)
+	activeWorkers, err := c.config.Store.GetActiveWorkers(ctx, c.replicaSet)
 	if err != nil {
-		return orchestrator.Generation{}, fmt.Errorf("failed to get current generation: %w", err)
+		return orchestrator.Generation{}, err
 	}
 
-	// Count non-stopped, non-stale workers in the current generation
-	partitionCount, err := c.CountExpectedWorkers(ctx, currentGen.ID)
-	if err != nil {
-		return orchestrator.Generation{}, fmt.Errorf("failed to count workers in current generation: %w", err)
-	}
-
+	partitionCount := len(activeWorkers)
 	if partitionCount < 1 {
 		partitionCount = 1
 	}
@@ -442,32 +437,16 @@ func (c *Coordinator) AssignPartitionsIfLeader(ctx context.Context, generationID
 // JoinOrCreate coordinates a worker joining or creating a generation.
 // It handles the full coordination flow:
 // 1. Get or create the current generation
-// 2. Check if reconfiguration is needed (new/stale workers)
-// 3. If reconfiguration needed, trigger it
-// 4. Return the active generation
+// 2. Return the active generation (without checking for reconfiguration)
 //
 // This method is designed to be called by workers at startup or after
-// a generation supersession event.
+// a generation supersession event. The worker should register in the returned
+// generation, then the orchestrator will check if reconfiguration is needed.
 func (c *Coordinator) JoinOrCreate(ctx context.Context) (orchestrator.Generation, error) {
 	// Get or create the current generation
 	gen, err := c.GetOrCreateGeneration(ctx)
 	if err != nil {
 		return orchestrator.Generation{}, fmt.Errorf("failed to get or create generation: %w", err)
-	}
-
-	// Check if reconfiguration is needed
-	shouldReconfig, err := c.ShouldTriggerReconfiguration(ctx)
-	if err != nil {
-		return orchestrator.Generation{}, fmt.Errorf("failed to check reconfiguration: %w", err)
-	}
-
-	if shouldReconfig {
-		// Trigger reconfiguration - this creates a new generation
-		newGen, err := c.TriggerReconfiguration(ctx)
-		if err != nil {
-			return orchestrator.Generation{}, fmt.Errorf("failed to trigger reconfiguration: %w", err)
-		}
-		return newGen, nil
 	}
 
 	return gen, nil

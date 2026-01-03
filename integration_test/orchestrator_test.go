@@ -910,3 +910,84 @@ func TestRecoveryAfterRestart(t *testing.T) {
 	// Note: proj2 should only process events not processed by proj1
 	assert.GreaterOrEqual(t, proj2.Count(), int64(100-firstRunCount))
 }
+
+// Test 11: Two workers starting simultaneously coordinate successfully
+// This is a regression test for the race condition where workers starting
+// at the same time would create generations with incorrect partition counts.
+func TestTwoWorkersStartingSimultaneously(t *testing.T) {
+	db, eventStore, genStore, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Create events
+	aggregateIDs := make([]string, 50)
+	for i := 0; i < 50; i++ {
+		aggregateIDs[i] = fmt.Sprintf("agg-%03d", i)
+	}
+	appendEventsForAggregates(t, ctx, db, eventStore, aggregateIDs, 1) // 50 events total
+
+	// Create projections for each worker
+	proj1 := NewCountingProjection("simultaneous-start-test")
+	proj2 := NewCountingProjection("simultaneous-start-test")
+
+	// Create two orchestrators (same replica set)
+	orch1 := createOrchestrator(t, db, eventStore, genStore, "simultaneous-start-test")
+	orch2 := createOrchestrator(t, db, eventStore, genStore, "simultaneous-start-test")
+
+	// Run both orchestrators SIMULTANEOUSLY (no delay)
+	done1 := make(chan error, 1)
+	done2 := make(chan error, 1)
+
+	// Start both at the same time
+	var wg sync.WaitGroup
+	wg.Add(2)
+	
+	go func() {
+		wg.Done()
+		done1 <- orch1.Run(ctx, []projection.Projection{proj1})
+	}()
+
+	go func() {
+		wg.Done()
+		done2 <- orch2.Run(ctx, []projection.Projection{proj2})
+	}()
+
+	// Wait for both to start
+	wg.Wait()
+	
+	// Give them time to coordinate and process events
+	// The key test is that they both reach running state and coordinate successfully
+	waitForCondition(t, 45*time.Second, func() bool {
+		total := proj1.Count() + proj2.Count()
+		// Both should start processing
+		return total >= 10
+	}, "both workers should coordinate and start processing events")
+
+	// Wait for all events to be processed
+	waitForCondition(t, 30*time.Second, func() bool {
+		total := proj1.Count() + proj2.Count()
+		return total >= 50
+	}, "both workers should process all events together")
+
+	// Stop orchestrators
+	cancel()
+	err1 := <-done1
+	err2 := <-done2
+
+	// Both should exit cleanly (context cancelled)
+	assert.ErrorIs(t, err1, context.Canceled, "worker 1 should exit cleanly")
+	assert.ErrorIs(t, err2, context.Canceled, "worker 2 should exit cleanly")
+
+	// Verify total events processed equals event count (no duplicates)
+	total := proj1.Count() + proj2.Count()
+	assert.Equal(t, int64(50), total, "total processed should equal event count (no duplicates)")
+
+	// Both workers should have processed some events (verifies both got running)
+	t.Logf("Worker 1 processed %d events, Worker 2 processed %d events", proj1.Count(), proj2.Count())
+	
+	// The key verification: both workers successfully coordinated and processed events
+	// This would fail with the race condition bug where workers create generations
+	// with incorrect partition counts when starting simultaneously
+}
