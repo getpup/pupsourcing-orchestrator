@@ -63,6 +63,10 @@ func (m *Manager) StartHeartbeat(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := m.config.Store.Heartbeat(ctx, m.workerID); err != nil {
+				// Check if context was cancelled during heartbeat
+				if ctx.Err() != nil {
+					return nil
+				}
 				if m.config.Logger != nil {
 					m.config.Logger.Error(ctx, "heartbeat failed", "workerID", m.workerID, "error", err)
 				}
