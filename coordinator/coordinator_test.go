@@ -702,3 +702,178 @@ func TestTriggerReconfiguration_WithNoActiveWorkersCreatesOnePartition(t *testin
 	assert.Len(t, mockStore.CreateGenerationCalls, 1)
 	assert.Equal(t, 1, mockStore.CreateGenerationCalls[0].TotalPartitions)
 }
+
+func TestIsLeader_WorkerWithSmallestIDIsLeader(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{ID: "worker-3", GenerationID: gid},
+			{ID: "worker-1", GenerationID: gid},
+			{ID: "worker-2", GenerationID: gid},
+		}, nil
+	}
+
+	coordinator := New(Config{Store: mockStore}, replicaSet)
+	ctx := context.Background()
+
+	isLeader, err := coordinator.IsLeader(ctx, generationID, "worker-1")
+
+	require.NoError(t, err)
+	assert.True(t, isLeader)
+}
+
+func TestIsLeader_OtherWorkersAreNotLeaders(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{ID: "worker-1", GenerationID: gid},
+			{ID: "worker-2", GenerationID: gid},
+			{ID: "worker-3", GenerationID: gid},
+		}, nil
+	}
+
+	coordinator := New(Config{Store: mockStore}, replicaSet)
+	ctx := context.Background()
+
+	isLeader2, err := coordinator.IsLeader(ctx, generationID, "worker-2")
+	require.NoError(t, err)
+	assert.False(t, isLeader2)
+
+	isLeader3, err := coordinator.IsLeader(ctx, generationID, "worker-3")
+	require.NoError(t, err)
+	assert.False(t, isLeader3)
+}
+
+func TestIsLeader_SingleWorkerIsLeader(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{ID: "worker-1", GenerationID: gid},
+		}, nil
+	}
+
+	coordinator := New(Config{Store: mockStore}, replicaSet)
+	ctx := context.Background()
+
+	isLeader, err := coordinator.IsLeader(ctx, generationID, "worker-1")
+
+	require.NoError(t, err)
+	assert.True(t, isLeader)
+}
+
+func TestIsLeader_EmptyWorkerListReturnsFalse(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{}, nil
+	}
+
+	coordinator := New(Config{Store: mockStore}, replicaSet)
+	ctx := context.Background()
+
+	isLeader, err := coordinator.IsLeader(ctx, generationID, "worker-1")
+
+	require.NoError(t, err)
+	assert.False(t, isLeader)
+}
+
+func TestIsLeader_WithUUIDStyleIDs(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{ID: "f47ac10b-58cc-4372-a567-0e02b2c3d479", GenerationID: gid},
+			{ID: "550e8400-e29b-41d4-a716-446655440000", GenerationID: gid},
+			{ID: "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d", GenerationID: gid},
+			{ID: "6ba7b810-9dad-11d1-80b4-00c04fd430c8", GenerationID: gid},
+		}, nil
+	}
+
+	coordinator := New(Config{Store: mockStore}, replicaSet)
+	ctx := context.Background()
+
+	// The lexicographically smallest UUID should be the leader
+	isLeader1, err := coordinator.IsLeader(ctx, generationID, "550e8400-e29b-41d4-a716-446655440000")
+	require.NoError(t, err)
+	assert.True(t, isLeader1)
+
+	// Others should not be leaders
+	isLeader2, err := coordinator.IsLeader(ctx, generationID, "6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	require.NoError(t, err)
+	assert.False(t, isLeader2)
+
+	isLeader3, err := coordinator.IsLeader(ctx, generationID, "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d")
+	require.NoError(t, err)
+	assert.False(t, isLeader3)
+
+	isLeader4, err := coordinator.IsLeader(ctx, generationID, "f47ac10b-58cc-4372-a567-0e02b2c3d479")
+	require.NoError(t, err)
+	assert.False(t, isLeader4)
+}
+
+func TestAssignPartitionsIfLeader_LeaderAssignsPartitions(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{ID: "worker-1", GenerationID: gid},
+			{ID: "worker-2", GenerationID: gid},
+			{ID: "worker-3", GenerationID: gid},
+		}, nil
+	}
+
+	mockStore.AssignPartitionFunc = func(ctx context.Context, workerID string, partitionKey int) error {
+		return nil
+	}
+
+	coordinator := New(Config{Store: mockStore}, replicaSet)
+	ctx := context.Background()
+
+	assigned, err := coordinator.AssignPartitionsIfLeader(ctx, generationID, "worker-1")
+
+	require.NoError(t, err)
+	assert.True(t, assigned)
+	assert.Len(t, mockStore.AssignPartitionCalls, 3, "leader should assign partitions to all workers")
+}
+
+func TestAssignPartitionsIfLeader_NonLeaderSkipsAssignment(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{ID: "worker-1", GenerationID: gid},
+			{ID: "worker-2", GenerationID: gid},
+			{ID: "worker-3", GenerationID: gid},
+		}, nil
+	}
+
+	mockStore.AssignPartitionFunc = func(ctx context.Context, workerID string, partitionKey int) error {
+		return nil
+	}
+
+	coordinator := New(Config{Store: mockStore}, replicaSet)
+	ctx := context.Background()
+
+	assigned, err := coordinator.AssignPartitionsIfLeader(ctx, generationID, "worker-2")
+
+	require.NoError(t, err)
+	assert.False(t, assigned)
+	assert.Len(t, mockStore.AssignPartitionCalls, 0, "non-leader should not assign partitions")
+}
