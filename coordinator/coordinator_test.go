@@ -1179,3 +1179,85 @@ func TestWaitForExpectedWorkers_IgnoresStaleWorkers(t *testing.T) {
 
 	require.NoError(t, err)
 }
+
+// TestTriggerReconfiguration_CountsOnlyCurrentGenerationWorkers is a regression test
+// for the bug where TriggerReconfiguration would count workers from ALL generations,
+// causing coordination failures when a second worker joined.
+func TestTriggerReconfiguration_CountsOnlyCurrentGenerationWorkers(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+
+	// Scenario: Worker 1 is running in generation 1, Worker 2 just registered as pending in generation 1
+	// When reconfiguration is triggered, it should count only workers from generation 1
+
+	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              "gen-1",
+			ReplicaSet:      rs,
+			TotalPartitions: 1,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		if gid == "gen-1" {
+			return []orchestrator.Worker{
+				{
+					ID:            "worker-1",
+					GenerationID:  "gen-1",
+					LastHeartbeat: time.Now(),
+					State:         orchestrator.WorkerStateRunning,
+				},
+				{
+					ID:            "worker-2",
+					GenerationID:  "gen-1",
+					LastHeartbeat: time.Now(),
+					State:         orchestrator.WorkerStatePending,
+				},
+			}, nil
+		}
+		return []orchestrator.Worker{}, nil
+	}
+
+	mockStore.GetActiveWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
+		// This should NOT be used by TriggerReconfiguration anymore
+		return []orchestrator.Worker{
+			{
+				ID:            "worker-1",
+				GenerationID:  "gen-1",
+				LastHeartbeat: time.Now(),
+			},
+			{
+				ID:            "worker-2",
+				GenerationID:  "gen-1",
+				LastHeartbeat: time.Now(),
+			},
+		}, nil
+	}
+
+	mockStore.MarkWorkerDeadFunc = func(ctx context.Context, wid string) error {
+		return nil
+	}
+
+	mockStore.CreateGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName, totalPartitions int) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              "gen-2",
+			ReplicaSet:      rs,
+			TotalPartitions: totalPartitions,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	coordinator := New(Config{Store: mockStore}, replicaSet)
+	ctx := context.Background()
+
+	gen, err := coordinator.TriggerReconfiguration(ctx)
+
+	require.NoError(t, err)
+	assert.Equal(t, "gen-2", gen.ID)
+	// The key assertion: new generation should have 2 partitions
+	// (Worker 1 + Worker 2 from generation 1)
+	assert.Equal(t, 2, gen.TotalPartitions, "should count workers from current generation only")
+	assert.Len(t, mockStore.CreateGenerationCalls, 1)
+	assert.Equal(t, 2, mockStore.CreateGenerationCalls[0].TotalPartitions)
+}
