@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/getpup/pupsourcing-orchestrator"
 	"github.com/getpup/pupsourcing/es"
 	"github.com/getpup/pupsourcing/es/adapters/postgres"
 	"github.com/getpup/pupsourcing/es/projection"
@@ -175,19 +174,13 @@ func TestRun_CorrectPartitionAssignmentTranslation(t *testing.T) {
 
 	executor := New(cfg)
 
-	_ = orchestrator.PartitionAssignment{
-		PartitionKey:    2,
-		TotalPartitions: 5,
-		GenerationID:    "gen-456",
-	}
-
 	// Verify executor has correct config that will be used in Run
 	assert.Equal(t, 75, executor.config.BatchSize)
 
 	// The actual ProcessorConfig would have:
 	// - BatchSize: 75
-	// - PartitionKey: 2
-	// - TotalPartitions: 5
+	// - PartitionKey: 2 (from assignment)
+	// - TotalPartitions: 5 (from assignment)
 	// - PartitionStrategy: projection.HashPartitionStrategy{}
 	// - PollInterval: 100ms
 	// But we can't verify this without either:
