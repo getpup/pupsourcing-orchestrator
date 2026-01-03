@@ -135,7 +135,7 @@ func (c *Coordinator) ShouldTriggerReconfiguration(ctx context.Context) (bool, e
 }
 
 // TriggerReconfiguration creates a new generation with the correct number of partitions.
-// It counts active (non-stale) workers + pending workers to determine partition count.
+// It counts workers from the current generation (non-stopped, non-stale) to determine partition count.
 // Returns the new generation.
 func (c *Coordinator) TriggerReconfiguration(ctx context.Context) (orchestrator.Generation, error) {
 	// Clean up stale workers first
@@ -143,13 +143,32 @@ func (c *Coordinator) TriggerReconfiguration(ctx context.Context) (orchestrator.
 		return orchestrator.Generation{}, fmt.Errorf("failed to cleanup stale workers: %w", err)
 	}
 
-	// Count active workers (will be the new partition count)
-	activeWorkers, err := c.config.Store.GetActiveWorkers(ctx, c.replicaSet)
+	// Get the current active generation to count its workers
+	currentGen, err := c.config.Store.GetActiveGeneration(ctx, c.replicaSet)
 	if err != nil {
-		return orchestrator.Generation{}, err
+		return orchestrator.Generation{}, fmt.Errorf("failed to get current generation: %w", err)
 	}
 
-	partitionCount := len(activeWorkers)
+	// Count non-stopped, non-stale workers in the current generation
+	workers, err := c.config.Store.GetWorkersByGeneration(ctx, currentGen.ID)
+	if err != nil {
+		return orchestrator.Generation{}, fmt.Errorf("failed to get workers for current generation: %w", err)
+	}
+
+	partitionCount := 0
+	now := time.Now()
+	for _, w := range workers {
+		// Skip stopped workers
+		if w.State == orchestrator.WorkerStateStopped {
+			continue
+		}
+		// Skip stale workers
+		if now.Sub(w.LastHeartbeat) > c.config.StaleWorkerTimeout {
+			continue
+		}
+		partitionCount++
+	}
+
 	if partitionCount < 1 {
 		partitionCount = 1
 	}

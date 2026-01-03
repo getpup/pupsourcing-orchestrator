@@ -580,6 +580,39 @@ func TestShouldTriggerReconfiguration_NoReconfigurationNeeded(t *testing.T) {
 func TestTriggerReconfiguration_CreatesGenerationWithCorrectPartitions(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              generationID,
+			ReplicaSet:      rs,
+			TotalPartitions: 2,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{
+				ID:            "worker-1",
+				GenerationID:  generationID,
+				LastHeartbeat: time.Now(),
+				State:         orchestrator.WorkerStateRunning,
+			},
+			{
+				ID:            "worker-2",
+				GenerationID:  generationID,
+				LastHeartbeat: time.Now(),
+				State:         orchestrator.WorkerStatePending,
+			},
+			{
+				ID:            "worker-3",
+				GenerationID:  generationID,
+				LastHeartbeat: time.Now(),
+				State:         orchestrator.WorkerStatePending,
+			},
+		}, nil
+	}
 
 	mockStore.GetActiveWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
 		return []orchestrator.Worker{
@@ -626,9 +659,48 @@ func TestTriggerReconfiguration_CreatesGenerationWithCorrectPartitions(t *testin
 func TestTriggerReconfiguration_CleansUpStaleWorkersFirst(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
 
 	staleTime := time.Now().Add(-2 * time.Minute)
 	markedDead := []string{}
+
+	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              generationID,
+			ReplicaSet:      rs,
+			TotalPartitions: 1,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		// After cleanup, only worker-2 remains
+		if len(markedDead) > 0 {
+			return []orchestrator.Worker{
+				{
+					ID:            "worker-2",
+					GenerationID:  generationID,
+					LastHeartbeat: time.Now(),
+					State:         orchestrator.WorkerStateRunning,
+				},
+			}, nil
+		}
+		// Before cleanup, both workers exist
+		return []orchestrator.Worker{
+			{
+				ID:            "worker-1",
+				GenerationID:  generationID,
+				LastHeartbeat: staleTime,
+				State:         orchestrator.WorkerStateRunning,
+			},
+			{
+				ID:            "worker-2",
+				GenerationID:  generationID,
+				LastHeartbeat: time.Now(),
+				State:         orchestrator.WorkerStateRunning,
+			},
+		}, nil
+	}
 
 	mockStore.GetActiveWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
 		return []orchestrator.Worker{
@@ -673,6 +745,20 @@ func TestTriggerReconfiguration_CleansUpStaleWorkersFirst(t *testing.T) {
 func TestTriggerReconfiguration_WithNoActiveWorkersCreatesOnePartition(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              generationID,
+			ReplicaSet:      rs,
+			TotalPartitions: 1,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{}, nil
+	}
 
 	mockStore.GetActiveWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
 		return []orchestrator.Worker{}, nil
