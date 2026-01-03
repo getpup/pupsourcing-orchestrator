@@ -34,7 +34,7 @@ test: ## Run tests
 
 test-integration: ## Run integration tests
 	@echo "Running integration tests..."
-	$(GOTEST) -v -tags=integration ./integration_test/...
+	$(GOTEST) -v -p=1 -tags=integration ./integration_test/... ./store/postgres/integration_test/...
 	@echo "Integration tests complete"
 
 clean: ## Clean build artifacts
