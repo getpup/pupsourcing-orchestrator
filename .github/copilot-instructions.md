@@ -2,7 +2,14 @@
 
 ## Project Overview
 
-pupsourcing-orchestrator is a companion library to [pupsourcing](https://github.com/getpup/pupsourcing) responsible for running, supervising, and scaling projections in an event-sourced system.
+pupsourcing-orchestrator is a companion library to [pupsourcing](https://github.com/getpup/pupsourcing) responsible for 
+running, supervising, and scaling projections in an event-sourced system.
+
+All tasks should align with the DEVELOPMENT_PLAN.md document. Always read the DEVELOPMENT_PLAN.md before starting work 
+on a task to understand the scope better.
+
+Since pupsourcing-orchestrator depends on https://github.com/getpup/pupsourcing, always study the core library before
+proceeding with work on the orchestrator tasks.
 
 ## Testing
 
@@ -129,7 +136,6 @@ Integration test organization:
 
 - Do not use the standard library `log` package for logging
 - Inject the `github.com/getpup/pupsourcing/es.Logger` interface for observability
-- Logger should be optional (check for nil before logging)
 - Use structured logging with key-value pairs: `logger.Info(ctx, "message", "key", value)`
 
 ## Code Style
