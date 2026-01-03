@@ -465,7 +465,7 @@ func TestTwoWorkersPartitionEvents(t *testing.T) {
 	// Verify distribution - with hash partitioning, we should see some distribution
 	// but we can't guarantee exactly 50/50, so we just check both processed something
 	t.Logf("Worker 1 processed %d events, Worker 2 processed %d events", proj1.Count(), proj2.Count())
-	
+
 	// With 100 different aggregates and hash partitioning, both should get some events
 	// However, in rare cases hash distribution might be very uneven, so we'll be lenient
 	if total == 100 {
@@ -707,7 +707,7 @@ func TestStaleWorkerCleanup(t *testing.T) {
 	// Verify combined count
 	total := firstCount + proj2.Count()
 	t.Logf("Second worker processed %d events, total: %d", proj2.Count(), total)
-	
+
 	// The key verification is that all events were eventually processed
 	assert.GreaterOrEqual(t, total, int64(100), "all events should be processed eventually")
 }
