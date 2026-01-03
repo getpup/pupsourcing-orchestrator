@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/getpup/pupsourcing-orchestrator"
 	"github.com/getpup/pupsourcing-orchestrator/store"
@@ -113,6 +114,11 @@ func (s *Store) RegisterWorker(ctx context.Context, replicaSet orchestrator.Repl
 		&worker.StartedAt,
 	)
 	if err != nil {
+		// Check for foreign key violation (PostgreSQL error code 23503)
+		// This indicates the generationID does not exist
+		if strings.Contains(err.Error(), "violates foreign key constraint") {
+			return orchestrator.Worker{}, store.ErrGenerationNotFound
+		}
 		return orchestrator.Worker{}, fmt.Errorf("failed to register worker: %w", err)
 	}
 

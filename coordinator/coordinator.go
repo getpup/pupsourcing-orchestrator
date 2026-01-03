@@ -54,36 +54,49 @@ func New(cfg Config, replicaSet orchestrator.ReplicaSetName) *Coordinator {
 }
 
 // JoinOrCreate gets the active generation for the replica set, or creates one if none exists.
-// If reconfiguration is needed (due to pending or stale workers), creates a new generation.
+// This method simply returns the current active generation or creates the first generation.
+// It does NOT trigger reconfiguration based on pending or stale workers.
+//
+// NOTE: The current JoinOrCreate implementation is simplified for single-worker scenarios.
+// For multi-worker coordination in the Recreate strategy, the orchestrator (Task 9) is
+// responsible for coordinating generation transitions. Workers should:
+// 1. Join the current generation
+// 2. Register themselves
+// 3. Wait for partition assignment
+// 4. Watch for generation changes and restart when superseded
 func (c *Coordinator) JoinOrCreate(ctx context.Context) (orchestrator.Generation, error) {
 	gen, err := c.config.Store.GetActiveGeneration(ctx, c.replicaSet)
 	if errors.Is(err, orchestrator.ErrReplicaSetNotFound) {
 		// No generation exists, create first one with 1 partition
-		newGen, err := c.config.Store.CreateGeneration(ctx, c.replicaSet, 1)
-		if err != nil {
-			return orchestrator.Generation{}, err
+		newGen, createErr := c.config.Store.CreateGeneration(ctx, c.replicaSet, 1)
+		if createErr != nil {
+			return orchestrator.Generation{}, createErr
 		}
-
 		if c.config.Logger != nil {
-			c.config.Logger.Info(ctx, "created first generation", "replicaSet", c.replicaSet, "generationID", newGen.ID)
+			c.config.Logger.Info(ctx, "created first generation",
+				"replicaSet", c.replicaSet, "generationID", newGen.ID)
 		}
-
 		return newGen, nil
 	}
 	if err != nil {
 		return orchestrator.Generation{}, err
 	}
+	return gen, nil
+}
 
+// NeedsReconfiguration checks if reconfiguration is needed due to pending or stale workers.
+// Returns (needsReconfig bool, newPartitionCount int, error).
+func (c *Coordinator) NeedsReconfiguration(ctx context.Context) (bool, int, error) {
 	// Check for pending workers
 	pendingWorkers, err := c.config.Store.GetPendingWorkers(ctx, c.replicaSet)
 	if err != nil {
-		return orchestrator.Generation{}, err
+		return false, 0, err
 	}
 
 	// Check for stale workers
 	activeWorkers, err := c.config.Store.GetActiveWorkers(ctx, c.replicaSet)
 	if err != nil {
-		return orchestrator.Generation{}, err
+		return false, 0, err
 	}
 
 	staleCount := 0
@@ -101,26 +114,28 @@ func (c *Coordinator) JoinOrCreate(ctx context.Context) (orchestrator.Generation
 		if newPartitionCount < 1 {
 			newPartitionCount = 1
 		}
-
-		newGen, err := c.config.Store.CreateGeneration(ctx, c.replicaSet, newPartitionCount)
-		if err != nil {
-			return orchestrator.Generation{}, err
-		}
-
-		if c.config.Logger != nil {
-			c.config.Logger.Info(ctx, "created new generation due to worker changes",
-				"replicaSet", c.replicaSet,
-				"generationID", newGen.ID,
-				"totalPartitions", newPartitionCount,
-				"pendingWorkers", len(pendingWorkers),
-				"staleWorkers", staleCount)
-		}
-
-		return newGen, nil
+		return true, newPartitionCount, nil
 	}
 
-	// No reconfiguration needed, return existing generation
-	return gen, nil
+	return false, 0, nil
+}
+
+// CreateNewGeneration creates a new generation with the specified number of partitions.
+// This should be called when reconfiguration is needed (e.g., workers joining or leaving).
+func (c *Coordinator) CreateNewGeneration(ctx context.Context, totalPartitions int) (orchestrator.Generation, error) {
+	newGen, err := c.config.Store.CreateGeneration(ctx, c.replicaSet, totalPartitions)
+	if err != nil {
+		return orchestrator.Generation{}, err
+	}
+
+	if c.config.Logger != nil {
+		c.config.Logger.Info(ctx, "created new generation",
+			"replicaSet", c.replicaSet,
+			"generationID", newGen.ID,
+			"totalPartitions", totalPartitions)
+	}
+
+	return newGen, nil
 }
 
 // WaitForPartitionAssignment polls the store until the worker has a partition assignment.
