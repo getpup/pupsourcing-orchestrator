@@ -581,10 +581,14 @@ func TestTransactionIsolation(t *testing.T) {
 
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
-		go func(state orchestrator.WorkerState) {
+		go func(index int) {
 			defer wg.Done()
+			state := orchestrator.WorkerStateReady
+			if index%2 == 0 {
+				state = orchestrator.WorkerStateRunning
+			}
 			_ = s.UpdateWorkerState(ctx, worker.ID, state)
-		}(orchestrator.WorkerState("state"))
+		}(i)
 	}
 
 	wg.Wait()
@@ -592,6 +596,7 @@ func TestTransactionIsolation(t *testing.T) {
 	retrievedWorker, err := s.GetWorker(ctx, worker.ID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, retrievedWorker.State)
+	assert.True(t, retrievedWorker.State == orchestrator.WorkerStateReady || retrievedWorker.State == orchestrator.WorkerStateRunning)
 
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
