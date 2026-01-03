@@ -639,5 +639,3 @@ func TestNew_CreatesDefaultExecutorWhenNotProvided(t *testing.T) {
 	_, isMock := orch.executor.(*executor.MockRunner)
 	assert.False(t, isMock)
 }
-
-
