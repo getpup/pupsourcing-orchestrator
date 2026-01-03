@@ -116,3 +116,39 @@ jobs:
 
       - name: Build
         run: make build
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: orchestrator_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: "host=localhost port=5432 user=postgres password=postgres dbname=orchestrator_test sslmode=disable"
+        run: make test-integration

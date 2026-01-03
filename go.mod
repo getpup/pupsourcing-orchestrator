@@ -5,6 +5,7 @@ go 1.24.11
 require (
 	github.com/getpup/pupsourcing v0.0.0-20260102213110-2a5483b5daff
 	github.com/google/uuid v1.6.0
+	github.com/lib/pq v1.10.9
 	github.com/stretchr/testify v1.11.1
 )
 

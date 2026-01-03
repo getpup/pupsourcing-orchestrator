@@ -32,6 +32,11 @@ test: ## Run tests
 	$(GOTEST) -v -race -coverprofile=coverage.out ./...
 	@echo "Tests complete"
 
+test-integration: ## Run integration tests
+	@echo "Running integration tests..."
+	$(GOTEST) -v -tags=integration ./integration_test/...
+	@echo "Integration tests complete"
+
 clean: ## Clean build artifacts
 	@echo "Cleaning..."
 	$(GOCLEAN)
