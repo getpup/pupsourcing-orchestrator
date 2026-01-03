@@ -7,8 +7,8 @@ import (
 	"os"
 	"testing"
 
-	_ "github.com/lib/pq"
 	pgstore "github.com/getpup/pupsourcing-orchestrator/store/postgres"
+	_ "github.com/lib/pq"
 )
 
 // getTestDB returns a database connection for integration tests.
