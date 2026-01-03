@@ -193,9 +193,12 @@ func WithPollInterval(interval time.Duration) Option {
 }
 
 // WithBatchSize sets the number of events to read per batch.
+// The batch size must be greater than zero.
 func WithBatchSize(size int) Option {
 	return func(c *config) {
-		c.batchSize = size
+		if size > 0 {
+			c.batchSize = size
+		}
 	}
 }
 
@@ -224,11 +227,15 @@ func WithMetricsEnabled(enabled bool) Option {
 // This allows you to use custom table names instead of the defaults:
 //   - generationsTable: default is "orchestrator_generations"
 //   - workersTable: default is "orchestrator_workers"
+//
+// Both table names must be non-empty strings.
 func WithTableNames(generationsTable, workersTable string) Option {
 	return func(c *config) {
-		c.tableConfig = postgres.TableConfig{
-			GenerationsTable: generationsTable,
-			WorkersTable:     workersTable,
+		if generationsTable != "" && workersTable != "" {
+			c.tableConfig = postgres.TableConfig{
+				GenerationsTable: generationsTable,
+				WorkersTable:     workersTable,
+			}
 		}
 	}
 }

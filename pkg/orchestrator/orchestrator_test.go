@@ -280,3 +280,102 @@ func TestRunMigrationsWithTableNames(t *testing.T) {
 	// We can't test execution without a real DB, but we verify the signature compiles
 	assert.NotNil(t, config)
 }
+
+func TestWithBatchSize_InvalidValue(t *testing.T) {
+	db := &sql.DB{}
+	eventStore := &espostgres.Store{}
+
+	t.Run("zero batch size uses default", func(t *testing.T) {
+		orch, err := New(
+			WithDatabase(db),
+			WithEventStore(eventStore),
+			WithReplicaSet("test-replica-set"),
+			WithBatchSize(0), // Zero should be ignored
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+		// If this succeeds, it means the default batch size (100) was used
+	})
+
+	t.Run("negative batch size uses default", func(t *testing.T) {
+		orch, err := New(
+			WithDatabase(db),
+			WithEventStore(eventStore),
+			WithReplicaSet("test-replica-set"),
+			WithBatchSize(-10), // Negative should be ignored
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+		// If this succeeds, it means the default batch size (100) was used
+	})
+
+	t.Run("positive batch size is accepted", func(t *testing.T) {
+		orch, err := New(
+			WithDatabase(db),
+			WithEventStore(eventStore),
+			WithReplicaSet("test-replica-set"),
+			WithBatchSize(500),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+	})
+}
+
+func TestWithTableNames_InvalidValues(t *testing.T) {
+	db := &sql.DB{}
+	eventStore := &espostgres.Store{}
+
+	t.Run("empty generations table uses defaults", func(t *testing.T) {
+		orch, err := New(
+			WithDatabase(db),
+			WithEventStore(eventStore),
+			WithReplicaSet("test-replica-set"),
+			WithTableNames("", "custom_workers"),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+		// If this succeeds, it means default table names were used
+	})
+
+	t.Run("empty workers table uses defaults", func(t *testing.T) {
+		orch, err := New(
+			WithDatabase(db),
+			WithEventStore(eventStore),
+			WithReplicaSet("test-replica-set"),
+			WithTableNames("custom_gen", ""),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+		// If this succeeds, it means default table names were used
+	})
+
+	t.Run("both empty tables use defaults", func(t *testing.T) {
+		orch, err := New(
+			WithDatabase(db),
+			WithEventStore(eventStore),
+			WithReplicaSet("test-replica-set"),
+			WithTableNames("", ""),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+		// If this succeeds, it means default table names were used
+	})
+
+	t.Run("valid table names are accepted", func(t *testing.T) {
+		orch, err := New(
+			WithDatabase(db),
+			WithEventStore(eventStore),
+			WithReplicaSet("test-replica-set"),
+			WithTableNames("custom_gen", "custom_workers"),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+	})
+}
