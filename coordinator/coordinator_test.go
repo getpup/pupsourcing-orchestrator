@@ -426,7 +426,6 @@ func TestWaitForAllReady_ContextCancellation(t *testing.T) {
 	assert.Equal(t, context.Canceled, err)
 }
 
-
 func TestCountExpectedWorkers_CountsActiveNonStaleWorkers(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
