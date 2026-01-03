@@ -58,22 +58,14 @@ func main() {
 	eventStore := postgres.NewStore(postgres.DefaultStoreConfig())
 
 	// Create first orchestrator for main projections
-	mainOrch, err := orchestrator.New(
-		orchestrator.WithDatabase(db),
-		orchestrator.WithEventStore(eventStore),
-		orchestrator.WithReplicaSet("main-projections"),
-	)
+	mainOrch, err := orchestrator.New(db, eventStore, "main-projections")
 	if err != nil {
 		_ = db.Close()
 		log.Fatalf("Failed to create main orchestrator: %v", err)
 	}
 
 	// Create second orchestrator for analytics projections
-	analyticsOrch, err := orchestrator.New(
-		orchestrator.WithDatabase(db),
-		orchestrator.WithEventStore(eventStore),
-		orchestrator.WithReplicaSet("analytics-projections"),
-	)
+	analyticsOrch, err := orchestrator.New(db, eventStore, "analytics-projections")
 	if err != nil {
 		_ = db.Close()
 		log.Fatalf("Failed to create analytics orchestrator: %v", err)

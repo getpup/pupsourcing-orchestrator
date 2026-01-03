@@ -34,9 +34,6 @@ type Option func(*config)
 
 // config holds the internal configuration for creating an Orchestrator.
 type config struct {
-	db                   *sql.DB
-	eventStore           *espostgres.Store
-	replicaSet           ReplicaSetName
 	genStore             store.GenerationStore
 	executor             executor.Runner
 	heartbeatInterval    time.Duration
@@ -50,12 +47,12 @@ type config struct {
 	tableConfig          postgres.TableConfig
 }
 
-// New creates a new Orchestrator with the given options.
+// New creates a new Orchestrator with the given required parameters and optional configuration.
 //
-// Required options:
-//   - WithDatabase: database connection
-//   - WithEventStore: event store for reading events
-//   - WithReplicaSet: name of the replica set
+// Required parameters:
+//   - db: database connection for storing generation state and projection processors
+//   - eventStore: event store for reading events
+//   - replicaSet: name of the replica set this orchestrator manages
 //
 // Optional configuration (with defaults):
 //   - WithHeartbeatInterval: interval between heartbeats (default: 5s)
@@ -73,14 +70,26 @@ type config struct {
 // Example:
 //
 //	orch, err := orchestrator.New(
-//	    orchestrator.WithDatabase(db),
-//	    orchestrator.WithEventStore(eventStore),
-//	    orchestrator.WithReplicaSet("main-projections"),
+//	    db,
+//	    eventStore,
+//	    "main-projections",
 //	    orchestrator.WithTableNames("custom_generations", "custom_workers"),
+//	    orchestrator.WithBatchSize(500),
 //	)
 //
-// Returns an error if any required option is missing.
-func New(opts ...Option) (rootpkg.Orchestrator, error) {
+// Returns an error if any required parameter is nil or empty.
+func New(db *sql.DB, eventStore *espostgres.Store, replicaSet ReplicaSetName, opts ...Option) (rootpkg.Orchestrator, error) {
+	// Validate required parameters
+	if db == nil {
+		return nil, fmt.Errorf("database is required")
+	}
+	if eventStore == nil {
+		return nil, fmt.Errorf("event store is required")
+	}
+	if replicaSet == "" {
+		return nil, fmt.Errorf("replica set is required")
+	}
+
 	// Apply defaults
 	cfg := &config{
 		heartbeatInterval:    5 * time.Second,
@@ -97,27 +106,16 @@ func New(opts ...Option) (rootpkg.Orchestrator, error) {
 		opt(cfg)
 	}
 
-	// Validate required fields
-	if cfg.db == nil {
-		return nil, fmt.Errorf("database is required: use WithDatabase option")
-	}
-	if cfg.eventStore == nil {
-		return nil, fmt.Errorf("event store is required: use WithEventStore option")
-	}
-	if cfg.replicaSet == "" {
-		return nil, fmt.Errorf("replica set is required: use WithReplicaSet option")
-	}
-
 	// Create generation store if not provided
 	if cfg.genStore == nil {
-		cfg.genStore = postgres.NewWithConfig(cfg.db, cfg.tableConfig)
+		cfg.genStore = postgres.NewWithConfig(db, cfg.tableConfig)
 	}
 
 	// Create executor if not provided
 	if cfg.executor == nil {
 		cfg.executor = executor.New(executor.Config{
-			DB:         cfg.db,
-			EventStore: cfg.eventStore,
+			DB:         db,
+			EventStore: eventStore,
 			BatchSize:  cfg.batchSize,
 			Logger:     cfg.logger,
 		})
@@ -125,10 +123,10 @@ func New(opts ...Option) (rootpkg.Orchestrator, error) {
 
 	// Create and return recreate orchestrator
 	orch := recreate.New(recreate.Config{
-		DB:                   cfg.db,
-		EventStore:           cfg.eventStore,
+		DB:                   db,
+		EventStore:           eventStore,
 		GenStore:             cfg.genStore,
-		ReplicaSet:           cfg.replicaSet,
+		ReplicaSet:           replicaSet,
 		Executor:             cfg.executor,
 		HeartbeatInterval:    cfg.heartbeatInterval,
 		StaleWorkerTimeout:   cfg.staleWorkerTimeout,
@@ -141,27 +139,6 @@ func New(opts ...Option) (rootpkg.Orchestrator, error) {
 	})
 
 	return orch, nil
-}
-
-// WithDatabase sets the database connection for storing generation state and projection processors.
-func WithDatabase(db *sql.DB) Option {
-	return func(c *config) {
-		c.db = db
-	}
-}
-
-// WithEventStore sets the event store for reading events.
-func WithEventStore(eventStore *espostgres.Store) Option {
-	return func(c *config) {
-		c.eventStore = eventStore
-	}
-}
-
-// WithReplicaSet sets the name of the replica set this orchestrator manages.
-func WithReplicaSet(replicaSet ReplicaSetName) Option {
-	return func(c *config) {
-		c.replicaSet = replicaSet
-	}
 }
 
 // WithHeartbeatInterval sets the interval between heartbeats.

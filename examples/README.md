@@ -104,13 +104,13 @@ The examples will automatically run migrations on startup.
 
 ### Configuration
 
-All examples follow a similar configuration pattern using functional options:
+All examples follow a similar configuration pattern:
 
 ```go
 orch, err := orchestrator.New(
-    orchestrator.WithDatabase(db),              // Required: PostgreSQL connection
-    orchestrator.WithEventStore(eventStore),    // Required: Event store
-    orchestrator.WithReplicaSet("my-replica"),  // Required: Replica set name
+    db,              // Required: PostgreSQL connection
+    eventStore,      // Required: Event store
+    "my-replica",    // Required: Replica set name
     orchestrator.WithHeartbeatInterval(5 * time.Second), // Optional: Default 5s
     orchestrator.WithStaleWorkerTimeout(30 * time.Second), // Optional: Default 30s
     orchestrator.WithCoordinationTimeout(60 * time.Second), // Optional: Default 60s

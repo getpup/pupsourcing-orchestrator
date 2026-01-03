@@ -12,15 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNew_ValidOptions(t *testing.T) {
+func TestNew_ValidParameters(t *testing.T) {
 	db := &sql.DB{}
 	eventStore := &espostgres.Store{}
 
-	orch, err := New(
-		WithDatabase(db),
-		WithEventStore(eventStore),
-		WithReplicaSet("test-replica-set"),
-	)
+	orch, err := New(db, eventStore, "test-replica-set")
 
 	require.NoError(t, err)
 	assert.NotNil(t, orch)
@@ -29,10 +25,7 @@ func TestNew_ValidOptions(t *testing.T) {
 func TestNew_MissingDatabase(t *testing.T) {
 	eventStore := &espostgres.Store{}
 
-	orch, err := New(
-		WithEventStore(eventStore),
-		WithReplicaSet("test-replica-set"),
-	)
+	orch, err := New(nil, eventStore, "test-replica-set")
 
 	assert.Error(t, err)
 	assert.Nil(t, orch)
@@ -42,10 +35,7 @@ func TestNew_MissingDatabase(t *testing.T) {
 func TestNew_MissingEventStore(t *testing.T) {
 	db := &sql.DB{}
 
-	orch, err := New(
-		WithDatabase(db),
-		WithReplicaSet("test-replica-set"),
-	)
+	orch, err := New(db, nil, "test-replica-set")
 
 	assert.Error(t, err)
 	assert.Nil(t, orch)
@@ -56,10 +46,7 @@ func TestNew_MissingReplicaSet(t *testing.T) {
 	db := &sql.DB{}
 	eventStore := &espostgres.Store{}
 
-	orch, err := New(
-		WithDatabase(db),
-		WithEventStore(eventStore),
-	)
+	orch, err := New(db, eventStore, "")
 
 	assert.Error(t, err)
 	assert.Nil(t, orch)
@@ -70,11 +57,7 @@ func TestNew_DefaultsAreApplied(t *testing.T) {
 	db := &sql.DB{}
 	eventStore := &espostgres.Store{}
 
-	orch, err := New(
-		WithDatabase(db),
-		WithEventStore(eventStore),
-		WithReplicaSet("test-replica-set"),
-	)
+	orch, err := New(db, eventStore, "test-replica-set")
 
 	require.NoError(t, err)
 	assert.NotNil(t, orch)
@@ -85,9 +68,9 @@ func TestNew_CustomValuesArePreserved(t *testing.T) {
 	eventStore := &espostgres.Store{}
 
 	orch, err := New(
-		WithDatabase(db),
-		WithEventStore(eventStore),
-		WithReplicaSet("test-replica-set"),
+		db,
+		eventStore,
+		"test-replica-set",
 		WithHeartbeatInterval(10*time.Second),
 		WithStaleWorkerTimeout(60*time.Second),
 		WithCoordinationTimeout(120*time.Second),
@@ -103,9 +86,9 @@ func TestWithTableNames(t *testing.T) {
 	eventStore := &espostgres.Store{}
 
 	orch, err := New(
-		WithDatabase(db),
-		WithEventStore(eventStore),
-		WithReplicaSet("test-replica-set"),
+		db,
+		eventStore,
+		"test-replica-set",
 		WithTableNames("custom_generations", "custom_workers"),
 	)
 
@@ -119,9 +102,9 @@ func TestWithGenerationStore(t *testing.T) {
 	customStore := postgres.New(db)
 
 	orch, err := New(
-		WithDatabase(db),
-		WithEventStore(eventStore),
-		WithReplicaSet("test-replica-set"),
+		db,
+		eventStore,
+		"test-replica-set",
 		WithGenerationStore(customStore),
 	)
 
@@ -134,9 +117,9 @@ func TestWithLogger(t *testing.T) {
 	eventStore := &espostgres.Store{}
 
 	orch, err := New(
-		WithDatabase(db),
-		WithEventStore(eventStore),
-		WithReplicaSet("test-replica-set"),
+		db,
+		eventStore,
+		"test-replica-set",
 		WithLogger(nil), // nil logger is valid
 	)
 
@@ -150,9 +133,9 @@ func TestWithMetricsEnabled(t *testing.T) {
 		eventStore := &espostgres.Store{}
 
 		orch, err := New(
-			WithDatabase(db),
-			WithEventStore(eventStore),
-			WithReplicaSet("test-replica-set"),
+			db,
+			eventStore,
+			"test-replica-set",
 			WithMetricsEnabled(true),
 		)
 
@@ -165,9 +148,9 @@ func TestWithMetricsEnabled(t *testing.T) {
 		eventStore := &espostgres.Store{}
 
 		orch, err := New(
-			WithDatabase(db),
-			WithEventStore(eventStore),
-			WithReplicaSet("test-replica-set"),
+			db,
+			eventStore,
+			"test-replica-set",
 			WithMetricsEnabled(false),
 		)
 
@@ -181,9 +164,9 @@ func TestWithPollInterval(t *testing.T) {
 	eventStore := &espostgres.Store{}
 
 	orch, err := New(
-		WithDatabase(db),
-		WithEventStore(eventStore),
-		WithReplicaSet("test-replica-set"),
+		db,
+		eventStore,
+		"test-replica-set",
 		WithPollInterval(2*time.Second),
 	)
 
@@ -196,9 +179,9 @@ func TestWithRegistrationWaitTime(t *testing.T) {
 	eventStore := &espostgres.Store{}
 
 	orch, err := New(
-		WithDatabase(db),
-		WithEventStore(eventStore),
-		WithReplicaSet("test-replica-set"),
+		db,
+		eventStore,
+		"test-replica-set",
 		WithRegistrationWaitTime(10*time.Second),
 	)
 
@@ -211,9 +194,9 @@ func TestMultipleOptions(t *testing.T) {
 	eventStore := &espostgres.Store{}
 
 	orch, err := New(
-		WithDatabase(db),
-		WithEventStore(eventStore),
-		WithReplicaSet("test-replica-set"),
+		db,
+		eventStore,
+		"test-replica-set",
 		WithHeartbeatInterval(10*time.Second),
 		WithStaleWorkerTimeout(60*time.Second),
 		WithCoordinationTimeout(120*time.Second),
@@ -287,9 +270,9 @@ func TestWithBatchSize_InvalidValue(t *testing.T) {
 
 	t.Run("zero batch size uses default", func(t *testing.T) {
 		orch, err := New(
-			WithDatabase(db),
-			WithEventStore(eventStore),
-			WithReplicaSet("test-replica-set"),
+			db,
+			eventStore,
+			"test-replica-set",
 			WithBatchSize(0), // Zero should be ignored
 		)
 
@@ -300,9 +283,9 @@ func TestWithBatchSize_InvalidValue(t *testing.T) {
 
 	t.Run("negative batch size uses default", func(t *testing.T) {
 		orch, err := New(
-			WithDatabase(db),
-			WithEventStore(eventStore),
-			WithReplicaSet("test-replica-set"),
+			db,
+			eventStore,
+			"test-replica-set",
 			WithBatchSize(-10), // Negative should be ignored
 		)
 
@@ -313,9 +296,9 @@ func TestWithBatchSize_InvalidValue(t *testing.T) {
 
 	t.Run("positive batch size is accepted", func(t *testing.T) {
 		orch, err := New(
-			WithDatabase(db),
-			WithEventStore(eventStore),
-			WithReplicaSet("test-replica-set"),
+			db,
+			eventStore,
+			"test-replica-set",
 			WithBatchSize(500),
 		)
 
@@ -330,9 +313,9 @@ func TestWithTableNames_InvalidValues(t *testing.T) {
 
 	t.Run("empty generations table uses defaults", func(t *testing.T) {
 		orch, err := New(
-			WithDatabase(db),
-			WithEventStore(eventStore),
-			WithReplicaSet("test-replica-set"),
+			db,
+			eventStore,
+			"test-replica-set",
 			WithTableNames("", "custom_workers"),
 		)
 
@@ -343,9 +326,9 @@ func TestWithTableNames_InvalidValues(t *testing.T) {
 
 	t.Run("empty workers table uses defaults", func(t *testing.T) {
 		orch, err := New(
-			WithDatabase(db),
-			WithEventStore(eventStore),
-			WithReplicaSet("test-replica-set"),
+			db,
+			eventStore,
+			"test-replica-set",
 			WithTableNames("custom_gen", ""),
 		)
 
@@ -356,9 +339,9 @@ func TestWithTableNames_InvalidValues(t *testing.T) {
 
 	t.Run("both empty tables use defaults", func(t *testing.T) {
 		orch, err := New(
-			WithDatabase(db),
-			WithEventStore(eventStore),
-			WithReplicaSet("test-replica-set"),
+			db,
+			eventStore,
+			"test-replica-set",
 			WithTableNames("", ""),
 		)
 
@@ -369,9 +352,9 @@ func TestWithTableNames_InvalidValues(t *testing.T) {
 
 	t.Run("valid table names are accepted", func(t *testing.T) {
 		orch, err := New(
-			WithDatabase(db),
-			WithEventStore(eventStore),
-			WithReplicaSet("test-replica-set"),
+			db,
+			eventStore,
+			"test-replica-set",
 			WithTableNames("custom_gen", "custom_workers"),
 		)
 

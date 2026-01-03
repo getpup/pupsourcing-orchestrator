@@ -75,11 +75,7 @@ func main() {
 	eventStore := postgres.NewStore(postgres.DefaultStoreConfig())
 
 	// Create orchestrator
-	orch, err := orchestrator.New(
-		orchestrator.WithDatabase(db),
-		orchestrator.WithEventStore(eventStore),
-		orchestrator.WithReplicaSet("main-projections"),
-	)
+	orch, err := orchestrator.New(db, eventStore, "main-projections")
 	if err != nil {
 		log.Fatalf("Failed to create orchestrator: %v", err)
 	}
@@ -165,15 +161,15 @@ This approach ensures:
 
 ## Configuration
 
-The orchestrator is configured using functional options passed to `orchestrator.New()`.
+The orchestrator is configured by passing required parameters and optional configuration to `orchestrator.New()`.
 
-### Required Options
+### Required Parameters
 
-| Option | Description |
-|--------|-------------|
-| `WithDatabase(db)` | Database connection for generation state and processors |
-| `WithEventStore(eventStore)` | Event store for reading events |
-| `WithReplicaSet(name)` | Name of the replica set this orchestrator manages |
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `db` | `*sql.DB` | Database connection for generation state and processors |
+| `eventStore` | `*postgres.Store` | Event store for reading events |
+| `replicaSet` | `ReplicaSetName` | Name of the replica set this orchestrator manages |
 
 ### Optional Configuration (with defaults)
 
@@ -201,9 +197,9 @@ You can customize these names:
 
 ```go
 orch, err := orchestrator.New(
-    orchestrator.WithDatabase(db),
-    orchestrator.WithEventStore(eventStore),
-    orchestrator.WithReplicaSet("main-projections"),
+    db,
+    eventStore,
+    "main-projections",
     orchestrator.WithTableNames("my_generations", "my_workers"),
 )
 ```
@@ -225,9 +221,9 @@ if err := orchestrator.RunMigrationsWithTableNames(db, tableConfig); err != nil 
 **High-Throughput Systems** (processing many events per second):
 ```go
 orch, err := orchestrator.New(
-	orchestrator.WithDatabase(db),
-	orchestrator.WithEventStore(eventStore),
-	orchestrator.WithReplicaSet("main-projections"),
+	db,
+	eventStore,
+	"main-projections",
 	orchestrator.WithBatchSize(1000),  // Larger batches for efficiency
 	orchestrator.WithHeartbeatInterval(3 * time.Second),
 	orchestrator.WithStaleWorkerTimeout(15 * time.Second),
@@ -237,9 +233,9 @@ orch, err := orchestrator.New(
 **Low-Latency Systems** (minimizing detection time for worker failures):
 ```go
 orch, err := orchestrator.New(
-	orchestrator.WithDatabase(db),
-	orchestrator.WithEventStore(eventStore),
-	orchestrator.WithReplicaSet("main-projections"),
+	db,
+	eventStore,
+	"main-projections",
 	orchestrator.WithHeartbeatInterval(2 * time.Second),
 	orchestrator.WithStaleWorkerTimeout(10 * time.Second),
 )
@@ -248,9 +244,9 @@ orch, err := orchestrator.New(
 **Stable Production Systems** (fewer workers, less churn):
 ```go
 orch, err := orchestrator.New(
-	orchestrator.WithDatabase(db),
-	orchestrator.WithEventStore(eventStore),
-	orchestrator.WithReplicaSet("main-projections"),
+	db,
+	eventStore,
+	"main-projections",
 	orchestrator.WithHeartbeatInterval(10 * time.Second),
 	orchestrator.WithStaleWorkerTimeout(60 * time.Second),
 	orchestrator.WithCoordinationTimeout(120 * time.Second),
@@ -263,17 +259,9 @@ You can run multiple independent replica sets in the same application. Each repl
 
 ```go
 // Create orchestrators for different replica sets
-mainOrch, _ := orchestrator.New(
-	orchestrator.WithDatabase(db),
-	orchestrator.WithEventStore(eventStore),
-	orchestrator.WithReplicaSet("main-projections"),
-)
+mainOrch, _ := orchestrator.New(db, eventStore, "main-projections")
 
-analyticsOrch, _ := orchestrator.New(
-	orchestrator.WithDatabase(db),
-	orchestrator.WithEventStore(eventStore),
-	orchestrator.WithReplicaSet("analytics-projections"),
-)
+analyticsOrch, _ := orchestrator.New(db, eventStore, "analytics-projections")
 
 // Run them concurrently
 var wg sync.WaitGroup
@@ -448,9 +436,9 @@ func (l *myLogger) Error(ctx context.Context, msg string, keysAndValues ...inter
 }
 
 orch, _ := orchestrator.New(
-	orchestrator.WithDatabase(db),
-	orchestrator.WithEventStore(eventStore),
-	orchestrator.WithReplicaSet("main-projections"),
+	db,
+	eventStore,
+	"main-projections",
 	orchestrator.WithLogger(&myLogger{}),
 )
 ```
@@ -564,11 +552,7 @@ processor.Run(ctx)
 
 ```go
 // New approach: orchestrator handles everything
-orch, _ := orchestrator.New(
-	orchestrator.WithDatabase(db),
-	orchestrator.WithEventStore(eventStore),
-	orchestrator.WithReplicaSet("main-projections"),
-)
+orch, _ := orchestrator.New(db, eventStore, "main-projections")
 
 projections := []projection.Projection{
 	&UserProjection{},
