@@ -186,13 +186,13 @@ groups:
           description: "Replica set {{ $labels.replica_set }} is reconfiguring frequently ({{ $value }} times/sec)"
 
       - alert: OrchestratorWorkerMismatch
-        expr: pupsourcing_orchestrator_active_workers != <expected_replicas>
+        expr: pupsourcing_orchestrator_active_workers != 3  # Change 3 to your expected replica count
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Worker count mismatch for {{ $labels.replica_set }}"
-          description: "Expected <expected_replicas> workers but found {{ $value }}"
+          description: "Expected 3 workers but found {{ $value }}"  # Update expected count to match expr
 
       - alert: OrchestratorSlowCoordination
         expr: histogram_quantile(0.95, rate(pupsourcing_orchestrator_coordination_duration_seconds_bucket[5m])) > 30

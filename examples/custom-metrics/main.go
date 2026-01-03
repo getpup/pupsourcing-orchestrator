@@ -69,13 +69,13 @@ func main() {
 
 	// Start custom HTTP server for metrics and health
 	mux := http.NewServeMux()
-	
+
 	// Serve orchestrator metrics (from default registry) on /metrics
 	mux.Handle("/metrics", promhttp.Handler())
-	
+
 	// Optionally, serve custom metrics on a separate endpoint
 	mux.Handle("/custom-metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
-	
+
 	// Add health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		// Check database connectivity
@@ -89,11 +89,12 @@ func main() {
 	})
 
 	server := &http.Server{
-		Addr:         ":8080",
-		Handler:      mux,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              ":8080",
+		Handler:           mux,
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {

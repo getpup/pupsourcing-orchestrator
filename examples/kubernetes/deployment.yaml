@@ -35,6 +35,8 @@ spec:
             port: metrics
           initialDelaySeconds: 10
           periodSeconds: 10
+        # Note: In production, use a dedicated /health endpoint instead of /metrics
+        # See examples/custom-metrics for implementing a proper health check
         resources:
           requests:
             memory: "256Mi"
