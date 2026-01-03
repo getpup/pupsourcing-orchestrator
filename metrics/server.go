@@ -31,10 +31,7 @@ func NewServer(addr string) *Server {
 // Returns immediately. Use Shutdown to stop.
 func (s *Server) Start() error {
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			// Log error - server failed to start
-			// Note: In production, you should handle this error appropriately
-		}
+		_ = s.server.ListenAndServe()
 	}()
 	return nil
 }

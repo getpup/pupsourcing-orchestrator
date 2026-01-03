@@ -31,7 +31,7 @@ func TestServer_StartAndShutdown(t *testing.T) {
 	resp, err := http.Get("http://localhost:9998/metrics")
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Shutdown the server
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -55,7 +55,7 @@ func TestServer_MetricsEndpointReturnsPrometheusFormat(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		server.Shutdown(ctx)
+		_ = server.Shutdown(ctx)
 	}()
 
 	// Give the server a moment to start
@@ -63,7 +63,9 @@ func TestServer_MetricsEndpointReturnsPrometheusFormat(t *testing.T) {
 
 	resp, err := http.Get("http://localhost:9997/metrics")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, resp.Header.Get("Content-Type"), "text/plain")
@@ -100,5 +102,5 @@ func TestServer_MultipleStartCallsDoNotError(t *testing.T) {
 	// Cleanup
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	server.Shutdown(ctx)
+	_ = server.Shutdown(ctx)
 }
