@@ -21,11 +21,13 @@ func TestNewServer_CreatesServerWithAddress(t *testing.T) {
 func TestServer_StartAndShutdown(t *testing.T) {
 	server := NewServer(":9998")
 
-	err := server.Start()
-	require.NoError(t, err)
+	server.Start()
 
 	// Give the server a moment to start
 	time.Sleep(100 * time.Millisecond)
+
+	// Check for startup errors
+	assert.NoError(t, server.Err())
 
 	// Verify server is running by making a request
 	resp, err := http.Get("http://localhost:9998/metrics")
@@ -49,8 +51,7 @@ func TestServer_StartAndShutdown(t *testing.T) {
 func TestServer_MetricsEndpointReturnsPrometheusFormat(t *testing.T) {
 	server := NewServer(":9997")
 
-	err := server.Start()
-	require.NoError(t, err)
+	server.Start()
 
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -74,8 +75,7 @@ func TestServer_MetricsEndpointReturnsPrometheusFormat(t *testing.T) {
 func TestServer_ShutdownWithCancelledContext(t *testing.T) {
 	server := NewServer(":9996")
 
-	err := server.Start()
-	require.NoError(t, err)
+	server.Start()
 
 	// Give the server a moment to start
 	time.Sleep(100 * time.Millisecond)
@@ -84,7 +84,7 @@ func TestServer_ShutdownWithCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err = server.Shutdown(ctx)
+	err := server.Shutdown(ctx)
 	// Shutdown may or may not return an error when the context is cancelled,
 	// depending on timing. We just verify it completes.
 	_ = err
@@ -93,14 +93,39 @@ func TestServer_ShutdownWithCancelledContext(t *testing.T) {
 func TestServer_MultipleStartCallsDoNotError(t *testing.T) {
 	server := NewServer(":9995")
 
-	err1 := server.Start()
-	err2 := server.Start()
+	server.Start()
+	server.Start()
 
-	assert.NoError(t, err1)
-	assert.NoError(t, err2)
+	// Both calls should not panic or cause issues
 
 	// Cleanup
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = server.Shutdown(ctx)
+}
+
+func TestServer_ErrReturnsStartupErrors(t *testing.T) {
+	// Start a server on a port
+	server1 := NewServer(":9994")
+	server1.Start()
+
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server1.Shutdown(ctx)
+	}()
+
+	// Give it time to bind
+	time.Sleep(100 * time.Millisecond)
+
+	// Try to start another server on the same port
+	server2 := NewServer(":9994")
+	server2.Start()
+
+	// Give it time to fail
+	time.Sleep(100 * time.Millisecond)
+
+	// Should return an error about port already in use
+	err := server2.Err()
+	assert.Error(t, err)
 }

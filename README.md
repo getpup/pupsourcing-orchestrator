@@ -301,10 +301,10 @@ defer metricsServer.Shutdown(ctx)
 To disable metrics collection:
 
 ```go
-disabled := false
+metricsEnabled := false
 orch := recreate.New(recreate.Config{
 	// ... other fields ...
-	MetricsEnabled: &disabled,
+	MetricsEnabled: &metricsEnabled,
 })
 ```
 
