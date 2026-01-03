@@ -259,6 +259,8 @@ The orchestrator exposes Prometheus metrics prefixed with `pupsourcing_orchestra
 
 If your application already exposes a `/metrics` endpoint using the Prometheus default registry, orchestrator metrics are automatically included - no additional configuration needed.
 
+For a complete example showing how to integrate orchestrator metrics with custom metrics and health endpoints, see [examples/custom-metrics](examples/custom-metrics/).
+
 Example with existing metrics endpoint:
 
 ```go
@@ -360,6 +362,8 @@ rate(pupsourcing_orchestrator_events_processed_total[5m])
 rate(pupsourcing_orchestrator_projection_errors_total[5m])
 ```
 
+For a pre-configured Grafana dashboard with these and other queries, see [examples/grafana](examples/grafana/).
+
 ## Production Considerations
 
 ### Monitoring
@@ -402,6 +406,8 @@ orch, _ := orchestrator.New(orchestrator.Config{
 ```
 
 ### Kubernetes Deployment
+
+For production-ready Kubernetes deployment manifests, see [examples/kubernetes](examples/kubernetes/).
 
 For Kubernetes deployments:
 
