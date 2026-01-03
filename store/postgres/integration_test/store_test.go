@@ -41,12 +41,20 @@ func getTestDB(t *testing.T) *sql.DB {
 }
 
 // setupTables creates the orchestrator tables using the default configuration.
+// It first drops any existing tables to ensure a clean state.
 func setupTables(t *testing.T, db *sql.DB) {
 	t.Helper()
 
 	config := pgstore.DefaultTableConfig()
-	migrationSQL := pgstore.MigrationUp(config)
+	
+	// Drop tables first to ensure clean state (idempotent)
+	migrationDown := pgstore.MigrationDown(config)
+	if _, err := db.Exec(migrationDown); err != nil {
+		t.Logf("warning: failed to drop tables (may not exist): %v", err)
+	}
 
+	// Create tables
+	migrationSQL := pgstore.MigrationUp(config)
 	if _, err := db.Exec(migrationSQL); err != nil {
 		t.Fatalf("failed to create tables: %v", err)
 	}
