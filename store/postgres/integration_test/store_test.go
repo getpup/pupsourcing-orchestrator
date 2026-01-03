@@ -54,7 +54,7 @@ func setupTables(t *testing.T, db *sql.DB) {
 	t.Helper()
 
 	config := pgstore.DefaultTableConfig()
-	
+
 	// Drop tables first to ensure clean state (idempotent)
 	migrationDown := pgstore.MigrationDown(config)
 	if _, err := db.Exec(migrationDown); err != nil {
@@ -510,7 +510,8 @@ func TestGetWorker_NotFound(t *testing.T) {
 	s := pgstore.New(db)
 	ctx := context.Background()
 
-	_, err := s.GetWorker(ctx, "nonexistent-worker-id")
+	// Use a valid UUID format that doesn't exist in the database
+	_, err := s.GetWorker(ctx, "00000000-0000-0000-0000-000000000000")
 	assert.ErrorIs(t, err, store.ErrWorkerNotFound)
 }
 
@@ -525,7 +526,8 @@ func TestAssignPartition_WorkerNotFound(t *testing.T) {
 	s := pgstore.New(db)
 	ctx := context.Background()
 
-	err := s.AssignPartition(ctx, "nonexistent-worker-id", 0)
+	// Use a valid UUID format that doesn't exist in the database
+	err := s.AssignPartition(ctx, "00000000-0000-0000-0000-000000000000", 0)
 	assert.ErrorIs(t, err, store.ErrWorkerNotFound)
 }
 
@@ -540,7 +542,8 @@ func TestUpdateWorkerState_WorkerNotFound(t *testing.T) {
 	s := pgstore.New(db)
 	ctx := context.Background()
 
-	err := s.UpdateWorkerState(ctx, "nonexistent-worker-id", orchestrator.WorkerStateRunning)
+	// Use a valid UUID format that doesn't exist in the database
+	err := s.UpdateWorkerState(ctx, "00000000-0000-0000-0000-000000000000", orchestrator.WorkerStateRunning)
 	assert.ErrorIs(t, err, store.ErrWorkerNotFound)
 }
 
@@ -555,7 +558,8 @@ func TestHeartbeat_WorkerNotFound(t *testing.T) {
 	s := pgstore.New(db)
 	ctx := context.Background()
 
-	err := s.Heartbeat(ctx, "nonexistent-worker-id")
+	// Use a valid UUID format that doesn't exist in the database
+	err := s.Heartbeat(ctx, "00000000-0000-0000-0000-000000000000")
 	assert.ErrorIs(t, err, store.ErrWorkerNotFound)
 }
 
@@ -570,7 +574,8 @@ func TestMarkWorkerDead_WorkerNotFound(t *testing.T) {
 	s := pgstore.New(db)
 	ctx := context.Background()
 
-	err := s.MarkWorkerDead(ctx, "nonexistent-worker-id")
+	// Use a valid UUID format that doesn't exist in the database
+	err := s.MarkWorkerDead(ctx, "00000000-0000-0000-0000-000000000000")
 	assert.ErrorIs(t, err, store.ErrWorkerNotFound)
 }
 
@@ -642,7 +647,8 @@ func TestRegisterWorker_GenerationNotFound(t *testing.T) {
 
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
 
-	_, err := s.RegisterWorker(ctx, replicaSet, "nonexistent-generation-id")
+	// Use a valid UUID format that doesn't exist in the database
+	_, err := s.RegisterWorker(ctx, replicaSet, "00000000-0000-0000-0000-000000000000")
 	assert.ErrorIs(t, err, store.ErrGenerationNotFound)
 }
 
