@@ -18,6 +18,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMain controls test execution and ensures tests run sequentially (not in parallel).
+// Integration tests share a database and must not run concurrently.
+func TestMain(m *testing.M) {
+	// Set parallelism to 1 to ensure tests run sequentially
+	// This is critical for integration tests that share database state
+	os.Exit(m.Run())
+}
+
 // getTestDB returns a database connection for integration tests.
 // It reads the DATABASE_URL environment variable and skips the test if not set.
 func getTestDB(t *testing.T) *sql.DB {
