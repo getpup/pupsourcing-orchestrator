@@ -155,7 +155,15 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 
 		// 4.5. Wait for other workers to register, then try to assign partitions if we are the leader
 		// This wait allows multiple workers starting simultaneously to all register before partition assignment
-		time.Sleep(o.config.RegistrationWaitTime)
+		waitTimer := time.NewTimer(o.config.RegistrationWaitTime)
+		select {
+		case <-waitTimer.C:
+			// Wait completed normally
+		case <-ctx.Done():
+			waitTimer.Stop()
+			cancelHeartbeat()
+			return ctx.Err()
+		}
 
 		// Try to assign partitions (only leader will actually assign)
 		_, err = o.coordinator.AssignPartitionsIfLeader(ctx, generation.ID, workerID)
