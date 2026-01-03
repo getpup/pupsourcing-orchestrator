@@ -508,12 +508,12 @@ func TestRun_LeaderAssignsPartitionsAfterRegistrationWait(t *testing.T) {
 	}
 
 	cfg := Config{
-		DB:                   &sql.DB{},
-		EventStore:           &postgres.Store{},
-		GenStore:             mockStore,
-		ReplicaSet:           replicaSet,
-		CoordinationTimeout:  1 * time.Second,
-		PollInterval:         50 * time.Millisecond,
+		DB:                  &sql.DB{},
+		EventStore:          &postgres.Store{},
+		GenStore:            mockStore,
+		ReplicaSet:          replicaSet,
+		CoordinationTimeout: 1 * time.Second,
+		PollInterval:        50 * time.Millisecond,
 	}
 
 	orch := New(cfg)
