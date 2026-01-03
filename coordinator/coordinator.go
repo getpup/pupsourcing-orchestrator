@@ -150,23 +150,9 @@ func (c *Coordinator) TriggerReconfiguration(ctx context.Context) (orchestrator.
 	}
 
 	// Count non-stopped, non-stale workers in the current generation
-	workers, err := c.config.Store.GetWorkersByGeneration(ctx, currentGen.ID)
+	partitionCount, err := c.CountExpectedWorkers(ctx, currentGen.ID)
 	if err != nil {
-		return orchestrator.Generation{}, fmt.Errorf("failed to get workers for current generation: %w", err)
-	}
-
-	partitionCount := 0
-	now := time.Now()
-	for _, w := range workers {
-		// Skip stopped workers
-		if w.State == orchestrator.WorkerStateStopped {
-			continue
-		}
-		// Skip stale workers
-		if now.Sub(w.LastHeartbeat) > c.config.StaleWorkerTimeout {
-			continue
-		}
-		partitionCount++
+		return orchestrator.Generation{}, fmt.Errorf("failed to count workers in current generation: %w", err)
 	}
 
 	if partitionCount < 1 {
