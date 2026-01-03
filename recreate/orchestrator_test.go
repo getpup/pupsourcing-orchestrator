@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/getpup/pupsourcing-orchestrator"
+	"github.com/getpup/pupsourcing-orchestrator/executor"
 	"github.com/getpup/pupsourcing-orchestrator/store"
 	"github.com/getpup/pupsourcing/es"
 	"github.com/getpup/pupsourcing/es/adapters/postgres"
@@ -602,3 +603,41 @@ func TestRun_PartitionAssignmentErrorHandled(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to assign partitions")
 	assert.ErrorIs(t, err, expectedErr)
 }
+
+func TestNew_UsesProvidedExecutor(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	mockExecutor := executor.NewMockRunner()
+
+	cfg := Config{
+		DB:         &sql.DB{},
+		EventStore: &postgres.Store{},
+		GenStore:   mockStore,
+		ReplicaSet: "test-replica-set",
+		Executor:   mockExecutor,
+	}
+
+	orch := New(cfg)
+
+	assert.Equal(t, mockExecutor, orch.executor)
+}
+
+func TestNew_CreatesDefaultExecutorWhenNotProvided(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+
+	cfg := Config{
+		DB:         &sql.DB{},
+		EventStore: &postgres.Store{},
+		GenStore:   mockStore,
+		ReplicaSet: "test-replica-set",
+		// Executor not provided
+	}
+
+	orch := New(cfg)
+
+	assert.NotNil(t, orch.executor)
+	// Verify it's the default executor type, not a mock
+	_, isMock := orch.executor.(*executor.MockRunner)
+	assert.False(t, isMock)
+}
+
+
