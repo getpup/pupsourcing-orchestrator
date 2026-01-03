@@ -251,17 +251,132 @@ wg.Wait()
 
 See [examples/multiple-replica-sets](examples/multiple-replica-sets/) for a complete example.
 
+## Metrics
+
+The orchestrator exposes Prometheus metrics prefixed with `pupsourcing_orchestrator_`. These metrics are automatically registered to the Prometheus default registry when metrics are enabled (default).
+
+### Integration with Existing Metrics
+
+If your application already exposes a `/metrics` endpoint using the Prometheus default registry, orchestrator metrics are automatically included - no additional configuration needed.
+
+Example with existing metrics endpoint:
+
+```go
+import (
+	"net/http"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/getpup/pupsourcing-orchestrator/recreate"
+)
+
+func main() {
+	// Your existing metrics endpoint
+	http.Handle("/metrics", promhttp.Handler())
+	go http.ListenAndServe(":9090", nil)
+
+	// Create orchestrator - metrics automatically appear at /metrics
+	orch := recreate.New(recreate.Config{
+		// ... config fields ...
+		// MetricsEnabled defaults to true
+	})
+
+	orch.Run(ctx, projections)
+}
+```
+
+### Standalone Metrics Server
+
+If you need a dedicated metrics endpoint, use the optional metrics server:
+
+```go
+import "github.com/getpup/pupsourcing-orchestrator/metrics"
+
+// Start metrics server on port 9090
+metricsServer := metrics.NewServer(":9090")
+metricsServer.Start()
+defer metricsServer.Shutdown(ctx)
+```
+
+### Disabling Metrics
+
+To disable metrics collection:
+
+```go
+metricsEnabled := false
+orch := recreate.New(recreate.Config{
+	// ... other fields ...
+	MetricsEnabled: &metricsEnabled,
+})
+```
+
+### Available Metrics
+
+#### Counters
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `pupsourcing_orchestrator_generations_total` | `replica_set` | Total number of generations created |
+| `pupsourcing_orchestrator_workers_registered_total` | `replica_set` | Total workers registered |
+| `pupsourcing_orchestrator_partition_assignments_total` | `replica_set` | Total partition assignments |
+| `pupsourcing_orchestrator_reconfiguration_total` | `replica_set` | Total reconfigurations triggered |
+| `pupsourcing_orchestrator_stale_workers_cleaned_total` | `replica_set` | Total stale workers cleaned up |
+| `pupsourcing_orchestrator_events_processed_total` | `replica_set`, `projection` | Total events processed |
+| `pupsourcing_orchestrator_projection_errors_total` | `replica_set`, `projection` | Total projection errors |
+
+#### Gauges
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `pupsourcing_orchestrator_active_workers` | `replica_set` | Current active workers |
+| `pupsourcing_orchestrator_current_generation_partitions` | `replica_set` | Current generation partition count |
+| `pupsourcing_orchestrator_worker_state` | `replica_set`, `worker_id`, `state` | Worker state (1 for current state, 0 otherwise) |
+
+#### Histograms
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `pupsourcing_orchestrator_coordination_duration_seconds` | `replica_set` | Time spent in coordination phase |
+| `pupsourcing_orchestrator_event_processing_duration_seconds` | `replica_set`, `projection` | Event processing latency |
+| `pupsourcing_orchestrator_heartbeat_latency_seconds` | `replica_set` | Heartbeat round-trip latency |
+
+### Example Queries
+
+Monitor orchestrator health with these Prometheus queries:
+
+```promql
+# Rate of reconfigurations (should be low in stable systems)
+rate(pupsourcing_orchestrator_reconfiguration_total[5m])
+
+# Current number of active workers per replica set
+pupsourcing_orchestrator_active_workers
+
+# Average coordination duration
+rate(pupsourcing_orchestrator_coordination_duration_seconds_sum[5m]) / 
+rate(pupsourcing_orchestrator_coordination_duration_seconds_count[5m])
+
+# Event processing rate per projection
+rate(pupsourcing_orchestrator_events_processed_total[5m])
+
+# Projection error rate
+rate(pupsourcing_orchestrator_projection_errors_total[5m])
+```
+
 ## Production Considerations
 
 ### Monitoring
 
-Monitor these metrics for healthy operation:
+The orchestrator provides comprehensive Prometheus metrics (see [Metrics](#metrics) section for details). Monitor these key indicators for healthy operation:
 
-- **Generation changes per hour**: Should be low in stable systems
-- **Worker count per replica set**: Should match your deployment replica count
-- **Heartbeat failures**: Should be rare
-- **Coordination timeout errors**: Indicates issues with worker synchronization
-- **Event processing lag**: Distance between current position and latest event
+- **Reconfiguration rate** (`pupsourcing_orchestrator_reconfiguration_total`): Should be low in stable systems
+- **Active workers** (`pupsourcing_orchestrator_active_workers`): Should match your deployment replica count
+- **Coordination duration** (`pupsourcing_orchestrator_coordination_duration_seconds`): Time workers spend coordinating during reconfiguration
+- **Event processing rate** (`pupsourcing_orchestrator_events_processed_total`): Throughput per projection
+- **Projection errors** (`pupsourcing_orchestrator_projection_errors_total`): Should be rare or zero
+
+Set up alerts for:
+- High reconfiguration rate (indicates worker instability)
+- Worker count mismatch (actual vs expected)
+- High coordination duration (slow synchronization)
+- High error rate (projection failures)
 
 ### Logging
 
