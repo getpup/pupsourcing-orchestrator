@@ -311,6 +311,7 @@ func TestRun_SingleWorkerGetsPartitionAssigned(t *testing.T) {
 
 	assignPartitionCalled := false
 	partitionAssigned := false
+	generationCreated := false
 
 	mockStore.GetActiveWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
 		return []orchestrator.Worker{}, nil
@@ -321,10 +322,19 @@ func TestRun_SingleWorkerGetsPartitionAssigned(t *testing.T) {
 	}
 
 	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
-		return orchestrator.Generation{}, orchestrator.ErrReplicaSetNotFound
+		if !generationCreated {
+			return orchestrator.Generation{}, orchestrator.ErrReplicaSetNotFound
+		}
+		return orchestrator.Generation{
+			ID:              generationID,
+			ReplicaSet:      rs,
+			TotalPartitions: 1,
+			CreatedAt:       time.Now(),
+		}, nil
 	}
 
 	mockStore.CreateGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName, totalPartitions int) (orchestrator.Generation, error) {
+		generationCreated = true
 		return orchestrator.Generation{
 			ID:              generationID,
 			ReplicaSet:      rs,
@@ -431,7 +441,7 @@ func TestRun_LeaderAssignsPartitionsAfterRegistrationWait(t *testing.T) {
 
 	assignPartitionCalled := false
 	var assignmentTime time.Time
-	startTime := time.Now()
+	generationCreated := false
 
 	mockStore.GetActiveWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
 		return []orchestrator.Worker{}, nil
@@ -442,10 +452,19 @@ func TestRun_LeaderAssignsPartitionsAfterRegistrationWait(t *testing.T) {
 	}
 
 	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
-		return orchestrator.Generation{}, orchestrator.ErrReplicaSetNotFound
+		if !generationCreated {
+			return orchestrator.Generation{}, orchestrator.ErrReplicaSetNotFound
+		}
+		return orchestrator.Generation{
+			ID:              generationID,
+			ReplicaSet:      rs,
+			TotalPartitions: 1,
+			CreatedAt:       time.Now(),
+		}, nil
 	}
 
 	mockStore.CreateGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName, totalPartitions int) (orchestrator.Generation, error) {
+		generationCreated = true
 		return orchestrator.Generation{
 			ID:              generationID,
 			ReplicaSet:      rs,
@@ -489,13 +508,12 @@ func TestRun_LeaderAssignsPartitionsAfterRegistrationWait(t *testing.T) {
 	}
 
 	cfg := Config{
-		DB:                   &sql.DB{},
-		EventStore:           &postgres.Store{},
-		GenStore:             mockStore,
-		ReplicaSet:           replicaSet,
-		RegistrationWaitTime: 200 * time.Millisecond,
-		CoordinationTimeout:  1 * time.Second,
-		PollInterval:         50 * time.Millisecond,
+		DB:                  &sql.DB{},
+		EventStore:          &postgres.Store{},
+		GenStore:            mockStore,
+		ReplicaSet:          replicaSet,
+		CoordinationTimeout: 1 * time.Second,
+		PollInterval:        50 * time.Millisecond,
 	}
 
 	orch := New(cfg)
@@ -516,21 +534,19 @@ func TestRun_LeaderAssignsPartitionsAfterRegistrationWait(t *testing.T) {
 	cancel()
 	<-done
 
+	// The test is about verifying the leader assigns partitions
+	// With the new implementation, WaitForExpectedWorkers should immediately proceed
+	// since we already have 1 worker registered and TotalPartitions is 1
 	assert.True(t, assignPartitionCalled, "assignment should be called")
-	// Verify the assignment happened at least after the registration wait time
-	// Use a small tolerance for timing variations
-	expectedMinTime := 200 * time.Millisecond
-	tolerance := 50 * time.Millisecond
-	actualTime := assignmentTime.Sub(startTime)
-	assert.True(t, actualTime >= expectedMinTime-tolerance,
-		"assignment should happen after registration wait time (expected >= %v, got %v)",
-		expectedMinTime, actualTime)
+	// Verify the assignment happened (timing is less deterministic with polling)
+	assert.False(t, assignmentTime.IsZero(), "assignment time should be recorded")
 }
 
 func TestRun_PartitionAssignmentErrorHandled(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
 	expectedErr := errors.New("assignment failed")
+	generationCreated := false
 
 	mockStore.GetActiveWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
 		return []orchestrator.Worker{}, nil
@@ -541,10 +557,19 @@ func TestRun_PartitionAssignmentErrorHandled(t *testing.T) {
 	}
 
 	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
-		return orchestrator.Generation{}, orchestrator.ErrReplicaSetNotFound
+		if !generationCreated {
+			return orchestrator.Generation{}, orchestrator.ErrReplicaSetNotFound
+		}
+		return orchestrator.Generation{
+			ID:              "gen-1",
+			ReplicaSet:      rs,
+			TotalPartitions: 1,
+			CreatedAt:       time.Now(),
+		}, nil
 	}
 
 	mockStore.CreateGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName, totalPartitions int) (orchestrator.Generation, error) {
+		generationCreated = true
 		return orchestrator.Generation{
 			ID:              "gen-1",
 			ReplicaSet:      rs,

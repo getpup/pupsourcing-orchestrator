@@ -877,3 +877,219 @@ func TestAssignPartitionsIfLeader_NonLeaderSkipsAssignment(t *testing.T) {
 	assert.False(t, assigned)
 	assert.Len(t, mockStore.AssignPartitionCalls, 0, "non-leader should not assign partitions")
 }
+
+func TestWaitForExpectedWorkers_ReturnsWhenExpectedWorkersRegistered(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              generationID,
+			ReplicaSet:      rs,
+			TotalPartitions: 3,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	callCount := 0
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		callCount++
+		if callCount == 1 {
+			return []orchestrator.Worker{
+				{ID: "worker-1", State: orchestrator.WorkerStatePending, LastHeartbeat: time.Now()},
+			}, nil
+		}
+		return []orchestrator.Worker{
+			{ID: "worker-1", State: orchestrator.WorkerStatePending, LastHeartbeat: time.Now()},
+			{ID: "worker-2", State: orchestrator.WorkerStatePending, LastHeartbeat: time.Now()},
+			{ID: "worker-3", State: orchestrator.WorkerStatePending, LastHeartbeat: time.Now()},
+		}, nil
+	}
+
+	coordinator := New(Config{
+		Store:        mockStore,
+		PollInterval: 10 * time.Millisecond,
+	}, replicaSet)
+	ctx := context.Background()
+
+	err := coordinator.WaitForExpectedWorkers(ctx, generationID)
+
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, callCount, 2)
+}
+
+func TestWaitForExpectedWorkers_TimesOutGracefully(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              generationID,
+			ReplicaSet:      rs,
+			TotalPartitions: 3,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{ID: "worker-1", State: orchestrator.WorkerStatePending, LastHeartbeat: time.Now()},
+		}, nil
+	}
+
+	coordinator := New(Config{
+		Store:               mockStore,
+		PollInterval:        10 * time.Millisecond,
+		CoordinationTimeout: 50 * time.Millisecond,
+	}, replicaSet)
+	ctx := context.Background()
+
+	err := coordinator.WaitForExpectedWorkers(ctx, generationID)
+
+	require.NoError(t, err, "should return nil on timeout for graceful degradation")
+}
+
+func TestWaitForExpectedWorkers_SingleWorkerCase(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              generationID,
+			ReplicaSet:      rs,
+			TotalPartitions: 1,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{ID: "worker-1", State: orchestrator.WorkerStatePending, LastHeartbeat: time.Now()},
+		}, nil
+	}
+
+	coordinator := New(Config{
+		Store:        mockStore,
+		PollInterval: 10 * time.Millisecond,
+	}, replicaSet)
+	ctx := context.Background()
+
+	err := coordinator.WaitForExpectedWorkers(ctx, generationID)
+
+	require.NoError(t, err)
+}
+
+func TestWaitForExpectedWorkers_ContextCancellation(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              generationID,
+			ReplicaSet:      rs,
+			TotalPartitions: 3,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{ID: "worker-1", State: orchestrator.WorkerStatePending, LastHeartbeat: time.Now()},
+		}, nil
+	}
+
+	coordinator := New(Config{
+		Store:        mockStore,
+		PollInterval: 10 * time.Millisecond,
+	}, replicaSet)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error)
+	go func() {
+		done <- coordinator.WaitForExpectedWorkers(ctx, generationID)
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		assert.Equal(t, context.Canceled, err)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("WaitForExpectedWorkers did not return promptly after context cancellation")
+	}
+}
+
+func TestWaitForExpectedWorkers_IgnoresStoppedWorkers(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              generationID,
+			ReplicaSet:      rs,
+			TotalPartitions: 2,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{ID: "worker-1", State: orchestrator.WorkerStatePending, LastHeartbeat: time.Now()},
+			{ID: "worker-2", State: orchestrator.WorkerStatePending, LastHeartbeat: time.Now()},
+			{ID: "worker-3", State: orchestrator.WorkerStateStopped, LastHeartbeat: time.Now()},
+		}, nil
+	}
+
+	coordinator := New(Config{
+		Store:        mockStore,
+		PollInterval: 10 * time.Millisecond,
+	}, replicaSet)
+	ctx := context.Background()
+
+	err := coordinator.WaitForExpectedWorkers(ctx, generationID)
+
+	require.NoError(t, err)
+}
+
+func TestWaitForExpectedWorkers_IgnoresStaleWorkers(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
+
+	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              generationID,
+			ReplicaSet:      rs,
+			TotalPartitions: 2,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	staleTime := time.Now().Add(-2 * time.Minute)
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{ID: "worker-1", State: orchestrator.WorkerStatePending, LastHeartbeat: time.Now()},
+			{ID: "worker-2", State: orchestrator.WorkerStatePending, LastHeartbeat: time.Now()},
+			{ID: "worker-3", State: orchestrator.WorkerStatePending, LastHeartbeat: staleTime},
+		}, nil
+	}
+
+	coordinator := New(Config{
+		Store:              mockStore,
+		PollInterval:       10 * time.Millisecond,
+		StaleWorkerTimeout: 1 * time.Minute,
+	}, replicaSet)
+	ctx := context.Background()
+
+	err := coordinator.WaitForExpectedWorkers(ctx, generationID)
+
+	require.NoError(t, err)
+}
