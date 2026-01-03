@@ -940,22 +940,21 @@ func TestTwoWorkersStartingSimultaneously(t *testing.T) {
 	done1 := make(chan error, 1)
 	done2 := make(chan error, 1)
 
-	// Start both at the same time
-	var wg sync.WaitGroup
-	wg.Add(2)
+	// Use a barrier to ensure both goroutines start at nearly the same time
+	startBarrier := make(chan struct{})
 	
 	go func() {
-		wg.Done()
+		<-startBarrier
 		done1 <- orch1.Run(ctx, []projection.Projection{proj1})
 	}()
 
 	go func() {
-		wg.Done()
+		<-startBarrier
 		done2 <- orch2.Run(ctx, []projection.Projection{proj2})
 	}()
 
-	// Wait for both to start
-	wg.Wait()
+	// Release both goroutines simultaneously
+	close(startBarrier)
 	
 	// Give them time to coordinate and process events
 	// The key test is that they both reach running state and coordinate successfully

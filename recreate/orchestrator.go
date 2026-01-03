@@ -182,7 +182,9 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 		}
 
 		if shouldReconfig {
-			// Wait briefly to allow other workers starting simultaneously to register
+			// Wait for RegistrationWaitTime to allow other workers starting simultaneously
+			// to register before we count and trigger reconfiguration. This ensures accurate
+			// partition counts when multiple workers start at the same time.
 			time.Sleep(o.config.RegistrationWaitTime)
 			
 			// Trigger reconfiguration - this creates a new generation
