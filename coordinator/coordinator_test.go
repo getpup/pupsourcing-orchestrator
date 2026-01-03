@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestJoinOrCreate_FirstWorkerCreatesGeneration(t *testing.T) {
+func TestGetOrCreateGeneration_FirstWorkerCreatesGeneration(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
 
@@ -31,7 +31,7 @@ func TestJoinOrCreate_FirstWorkerCreatesGeneration(t *testing.T) {
 	coordinator := New(Config{Store: mockStore}, replicaSet)
 	ctx := context.Background()
 
-	gen, err := coordinator.JoinOrCreate(ctx)
+	gen, err := coordinator.GetOrCreateGeneration(ctx)
 
 	require.NoError(t, err)
 	assert.Equal(t, "gen-1", gen.ID)
@@ -42,7 +42,7 @@ func TestJoinOrCreate_FirstWorkerCreatesGeneration(t *testing.T) {
 	assert.Equal(t, 1, mockStore.CreateGenerationCalls[0].TotalPartitions)
 }
 
-func TestJoinOrCreate_SecondWorkerReturnsExistingGeneration(t *testing.T) {
+func TestGetOrCreateGeneration_SecondWorkerReturnsExistingGeneration(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
 
@@ -60,7 +60,7 @@ func TestJoinOrCreate_SecondWorkerReturnsExistingGeneration(t *testing.T) {
 	coordinator := New(Config{Store: mockStore}, replicaSet)
 	ctx := context.Background()
 
-	gen, err := coordinator.JoinOrCreate(ctx)
+	gen, err := coordinator.GetOrCreateGeneration(ctx)
 
 	require.NoError(t, err)
 	assert.Equal(t, "gen-1", gen.ID)
@@ -426,50 +426,55 @@ func TestWaitForAllReady_ContextCancellation(t *testing.T) {
 	assert.Equal(t, context.Canceled, err)
 }
 
-func TestJoinOrCreate_ReturnsExistingGenerationWhenNoChanges(t *testing.T) {
+func TestCountExpectedWorkers_CountsActiveNonStaleWorkers(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+	generationID := "gen-1"
 
-	existingGen := orchestrator.Generation{
-		ID:              "gen-1",
-		ReplicaSet:      replicaSet,
-		TotalPartitions: 2,
-		CreatedAt:       time.Now(),
-	}
+	staleTime := time.Now().Add(-2 * time.Minute)
 
-	mockStore.GetActiveGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) (orchestrator.Generation, error) {
-		return existingGen, nil
-	}
-
-	mockStore.GetPendingWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
-		return []orchestrator.Worker{}, nil
-	}
-
-	mockStore.GetActiveWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
+	mockStore.GetWorkersByGenerationFunc = func(ctx context.Context, gid string) ([]orchestrator.Worker, error) {
 		return []orchestrator.Worker{
 			{
 				ID:            "worker-1",
+				GenerationID:  gid,
+				State:         orchestrator.WorkerStateRunning,
 				LastHeartbeat: time.Now(),
 			},
 			{
 				ID:            "worker-2",
+				GenerationID:  gid,
+				State:         orchestrator.WorkerStatePending,
 				LastHeartbeat: time.Now(),
+			},
+			{
+				ID:            "worker-3",
+				GenerationID:  gid,
+				State:         orchestrator.WorkerStateStopped,
+				LastHeartbeat: time.Now(),
+			},
+			{
+				ID:            "worker-4",
+				GenerationID:  gid,
+				State:         orchestrator.WorkerStateRunning,
+				LastHeartbeat: staleTime,
 			},
 		}, nil
 	}
 
-	coordinator := New(Config{Store: mockStore}, replicaSet)
+	coordinator := New(Config{
+		Store:              mockStore,
+		StaleWorkerTimeout: 1 * time.Minute,
+	}, replicaSet)
 	ctx := context.Background()
 
-	gen, err := coordinator.JoinOrCreate(ctx)
+	count, err := coordinator.CountExpectedWorkers(ctx, generationID)
 
 	require.NoError(t, err)
-	assert.Equal(t, existingGen.ID, gen.ID)
-	assert.Equal(t, existingGen.TotalPartitions, gen.TotalPartitions)
-	assert.Len(t, mockStore.CreateGenerationCalls, 0, "should not create new generation")
+	assert.Equal(t, 2, count, "should count only non-stopped, non-stale workers")
 }
 
-func TestNeedsReconfiguration_PendingWorkersDetected(t *testing.T) {
+func TestShouldTriggerReconfiguration_WithPendingWorkers(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
 
@@ -501,14 +506,13 @@ func TestNeedsReconfiguration_PendingWorkersDetected(t *testing.T) {
 	coordinator := New(Config{Store: mockStore}, replicaSet)
 	ctx := context.Background()
 
-	needsReconfig, newPartitionCount, err := coordinator.NeedsReconfiguration(ctx)
+	shouldTrigger, err := coordinator.ShouldTriggerReconfiguration(ctx)
 
 	require.NoError(t, err)
-	assert.True(t, needsReconfig)
-	assert.Equal(t, 2, newPartitionCount)
+	assert.True(t, shouldTrigger)
 }
 
-func TestNeedsReconfiguration_StaleWorkersDetected(t *testing.T) {
+func TestShouldTriggerReconfiguration_WithStaleWorkers(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
 
@@ -537,14 +541,13 @@ func TestNeedsReconfiguration_StaleWorkersDetected(t *testing.T) {
 	}, replicaSet)
 	ctx := context.Background()
 
-	needsReconfig, newPartitionCount, err := coordinator.NeedsReconfiguration(ctx)
+	shouldTrigger, err := coordinator.ShouldTriggerReconfiguration(ctx)
 
 	require.NoError(t, err)
-	assert.True(t, needsReconfig)
-	assert.Equal(t, 1, newPartitionCount)
+	assert.True(t, shouldTrigger)
 }
 
-func TestNeedsReconfiguration_NoReconfigurationNeeded(t *testing.T) {
+func TestShouldTriggerReconfiguration_NoReconfigurationNeeded(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
 
@@ -568,16 +571,36 @@ func TestNeedsReconfiguration_NoReconfigurationNeeded(t *testing.T) {
 	coordinator := New(Config{Store: mockStore}, replicaSet)
 	ctx := context.Background()
 
-	needsReconfig, newPartitionCount, err := coordinator.NeedsReconfiguration(ctx)
+	shouldTrigger, err := coordinator.ShouldTriggerReconfiguration(ctx)
 
 	require.NoError(t, err)
-	assert.False(t, needsReconfig)
-	assert.Equal(t, 0, newPartitionCount)
+	assert.False(t, shouldTrigger)
 }
 
-func TestCreateNewGeneration_CreatesGenerationWithSpecifiedPartitions(t *testing.T) {
+func TestTriggerReconfiguration_CreatesGenerationWithCorrectPartitions(t *testing.T) {
 	mockStore := store.NewMockGenerationStore()
 	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+
+	mockStore.GetActiveWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{
+				ID:            "worker-1",
+				LastHeartbeat: time.Now(),
+			},
+			{
+				ID:            "worker-2",
+				LastHeartbeat: time.Now(),
+			},
+			{
+				ID:            "worker-3",
+				LastHeartbeat: time.Now(),
+			},
+		}, nil
+	}
+
+	mockStore.MarkWorkerDeadFunc = func(ctx context.Context, wid string) error {
+		return nil
+	}
 
 	mockStore.CreateGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName, totalPartitions int) (orchestrator.Generation, error) {
 		return orchestrator.Generation{
@@ -591,11 +614,91 @@ func TestCreateNewGeneration_CreatesGenerationWithSpecifiedPartitions(t *testing
 	coordinator := New(Config{Store: mockStore}, replicaSet)
 	ctx := context.Background()
 
-	gen, err := coordinator.CreateNewGeneration(ctx, 3)
+	gen, err := coordinator.TriggerReconfiguration(ctx)
 
 	require.NoError(t, err)
 	assert.Equal(t, "gen-2", gen.ID)
 	assert.Equal(t, 3, gen.TotalPartitions)
 	assert.Len(t, mockStore.CreateGenerationCalls, 1)
 	assert.Equal(t, 3, mockStore.CreateGenerationCalls[0].TotalPartitions)
+}
+
+func TestTriggerReconfiguration_CleansUpStaleWorkersFirst(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+
+	staleTime := time.Now().Add(-2 * time.Minute)
+	markedDead := []string{}
+
+	mockStore.GetActiveWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{
+			{
+				ID:            "worker-1",
+				LastHeartbeat: staleTime,
+			},
+			{
+				ID:            "worker-2",
+				LastHeartbeat: time.Now(),
+			},
+		}, nil
+	}
+
+	mockStore.MarkWorkerDeadFunc = func(ctx context.Context, wid string) error {
+		markedDead = append(markedDead, wid)
+		return nil
+	}
+
+	mockStore.CreateGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName, totalPartitions int) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              "gen-2",
+			ReplicaSet:      rs,
+			TotalPartitions: totalPartitions,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	coordinator := New(Config{
+		Store:              mockStore,
+		StaleWorkerTimeout: 1 * time.Minute,
+	}, replicaSet)
+	ctx := context.Background()
+
+	gen, err := coordinator.TriggerReconfiguration(ctx)
+
+	require.NoError(t, err)
+	assert.Equal(t, "gen-2", gen.ID)
+	assert.Contains(t, markedDead, "worker-1", "stale worker should be marked dead")
+}
+
+func TestTriggerReconfiguration_WithNoActiveWorkersCreatesOnePartition(t *testing.T) {
+	mockStore := store.NewMockGenerationStore()
+	replicaSet := orchestrator.ReplicaSetName("test-replica-set")
+
+	mockStore.GetActiveWorkersFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName) ([]orchestrator.Worker, error) {
+		return []orchestrator.Worker{}, nil
+	}
+
+	mockStore.MarkWorkerDeadFunc = func(ctx context.Context, wid string) error {
+		return nil
+	}
+
+	mockStore.CreateGenerationFunc = func(ctx context.Context, rs orchestrator.ReplicaSetName, totalPartitions int) (orchestrator.Generation, error) {
+		return orchestrator.Generation{
+			ID:              "gen-2",
+			ReplicaSet:      rs,
+			TotalPartitions: totalPartitions,
+			CreatedAt:       time.Now(),
+		}, nil
+	}
+
+	coordinator := New(Config{Store: mockStore}, replicaSet)
+	ctx := context.Background()
+
+	gen, err := coordinator.TriggerReconfiguration(ctx)
+
+	require.NoError(t, err)
+	assert.Equal(t, "gen-2", gen.ID)
+	assert.Equal(t, 1, gen.TotalPartitions)
+	assert.Len(t, mockStore.CreateGenerationCalls, 1)
+	assert.Equal(t, 1, mockStore.CreateGenerationCalls[0].TotalPartitions)
 }
