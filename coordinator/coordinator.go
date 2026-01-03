@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/getpup/pupsourcing-orchestrator"
@@ -56,7 +57,7 @@ func New(cfg Config, replicaSet orchestrator.ReplicaSetName) *Coordinator {
 // If reconfiguration is needed (due to pending or stale workers), creates a new generation.
 func (c *Coordinator) JoinOrCreate(ctx context.Context) (orchestrator.Generation, error) {
 	gen, err := c.config.Store.GetActiveGeneration(ctx, c.replicaSet)
-	if err == orchestrator.ErrReplicaSetNotFound {
+	if errors.Is(err, orchestrator.ErrReplicaSetNotFound) {
 		// No generation exists, create first one with 1 partition
 		newGen, err := c.config.Store.CreateGeneration(ctx, c.replicaSet, 1)
 		if err != nil {
