@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/getpup/pupsourcing-orchestrator"
@@ -53,18 +54,10 @@ func New(cfg Config, replicaSet orchestrator.ReplicaSetName) *Coordinator {
 	}
 }
 
-// JoinOrCreate gets the active generation for the replica set, or creates one if none exists.
-// This method simply returns the current active generation or creates the first generation.
-// It does NOT trigger reconfiguration based on pending or stale workers.
-//
-// NOTE: The current JoinOrCreate implementation is simplified for single-worker scenarios.
-// For multi-worker coordination in the Recreate strategy, the orchestrator (Task 9) is
-// responsible for coordinating generation transitions. Workers should:
-// 1. Join the current generation
-// 2. Register themselves
-// 3. Wait for partition assignment
-// 4. Watch for generation changes and restart when superseded
-func (c *Coordinator) JoinOrCreate(ctx context.Context) (orchestrator.Generation, error) {
+// GetOrCreateGeneration returns the current active generation for the replica set.
+// If no generation exists, creates one with 1 partition.
+// This method does NOT handle reconfiguration - that's done separately.
+func (c *Coordinator) GetOrCreateGeneration(ctx context.Context) (orchestrator.Generation, error) {
 	gen, err := c.config.Store.GetActiveGeneration(ctx, c.replicaSet)
 	if errors.Is(err, orchestrator.ErrReplicaSetNotFound) {
 		// No generation exists, create first one with 1 partition
@@ -84,55 +77,93 @@ func (c *Coordinator) JoinOrCreate(ctx context.Context) (orchestrator.Generation
 	return gen, nil
 }
 
-// NeedsReconfiguration checks if reconfiguration is needed due to pending or stale workers.
-// Returns (needsReconfig bool, newPartitionCount int, error).
-func (c *Coordinator) NeedsReconfiguration(ctx context.Context) (bool, int, error) {
+// CountExpectedWorkers returns the number of workers that should be in the current generation.
+// This is: active workers (non-stopped, non-stale) + pending workers in current generation.
+func (c *Coordinator) CountExpectedWorkers(ctx context.Context, generationID string) (int, error) {
+	// Get all workers for this generation
+	workers, err := c.config.Store.GetWorkersByGeneration(ctx, generationID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Count non-stopped workers that are not stale
+	count := 0
+	now := time.Now()
+	for _, w := range workers {
+		// Skip stopped workers
+		if w.State == orchestrator.WorkerStateStopped {
+			continue
+		}
+		// Skip stale workers
+		if now.Sub(w.LastHeartbeat) > c.config.StaleWorkerTimeout {
+			continue
+		}
+		count++
+	}
+
+	return count, nil
+}
+
+// ShouldTriggerReconfiguration checks if a new generation should be created.
+// Returns true if there are pending workers waiting for partition assignment,
+// OR if there are stale workers that need to be cleaned up.
+func (c *Coordinator) ShouldTriggerReconfiguration(ctx context.Context) (bool, error) {
 	// Check for pending workers
 	pendingWorkers, err := c.config.Store.GetPendingWorkers(ctx, c.replicaSet)
 	if err != nil {
-		return false, 0, err
+		return false, err
+	}
+
+	if len(pendingWorkers) > 0 {
+		return true, nil
 	}
 
 	// Check for stale workers
 	activeWorkers, err := c.config.Store.GetActiveWorkers(ctx, c.replicaSet)
 	if err != nil {
-		return false, 0, err
+		return false, err
 	}
 
-	staleCount := 0
 	now := time.Now()
 	for _, w := range activeWorkers {
 		if now.Sub(w.LastHeartbeat) > c.config.StaleWorkerTimeout {
-			staleCount++
+			return true, nil
 		}
 	}
 
-	// If we have pending workers or stale workers, need to reconfigure
-	if len(pendingWorkers) > 0 || staleCount > 0 {
-		// Calculate new partition count: active workers - stale + pending
-		newPartitionCount := len(activeWorkers) - staleCount + len(pendingWorkers)
-		if newPartitionCount < 1 {
-			newPartitionCount = 1
-		}
-		return true, newPartitionCount, nil
-	}
-
-	return false, 0, nil
+	return false, nil
 }
 
-// CreateNewGeneration creates a new generation with the specified number of partitions.
-// This should be called when reconfiguration is needed (e.g., workers joining or leaving).
-func (c *Coordinator) CreateNewGeneration(ctx context.Context, totalPartitions int) (orchestrator.Generation, error) {
-	newGen, err := c.config.Store.CreateGeneration(ctx, c.replicaSet, totalPartitions)
+// TriggerReconfiguration creates a new generation with the correct number of partitions.
+// It counts active (non-stale) workers + pending workers to determine partition count.
+// Returns the new generation.
+func (c *Coordinator) TriggerReconfiguration(ctx context.Context) (orchestrator.Generation, error) {
+	// Clean up stale workers first
+	if err := c.CleanupStaleWorkers(ctx); err != nil {
+		return orchestrator.Generation{}, fmt.Errorf("failed to cleanup stale workers: %w", err)
+	}
+
+	// Count active workers (will be the new partition count)
+	activeWorkers, err := c.config.Store.GetActiveWorkers(ctx, c.replicaSet)
+	if err != nil {
+		return orchestrator.Generation{}, err
+	}
+
+	partitionCount := len(activeWorkers)
+	if partitionCount < 1 {
+		partitionCount = 1
+	}
+
+	newGen, err := c.config.Store.CreateGeneration(ctx, c.replicaSet, partitionCount)
 	if err != nil {
 		return orchestrator.Generation{}, err
 	}
 
 	if c.config.Logger != nil {
-		c.config.Logger.Info(ctx, "created new generation",
+		c.config.Logger.Info(ctx, "triggered reconfiguration",
 			"replicaSet", c.replicaSet,
-			"generationID", newGen.ID,
-			"totalPartitions", totalPartitions)
+			"newGenerationID", newGen.ID,
+			"totalPartitions", partitionCount)
 	}
 
 	return newGen, nil
