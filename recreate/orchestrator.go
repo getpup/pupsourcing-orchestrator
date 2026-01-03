@@ -175,8 +175,8 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 			o.collector.IncWorkersRegistered()
 		}
 
-		// 4. Now check if reconfiguration is needed (with this worker registered)
-		shouldReconfig, err := o.coordinator.ShouldTriggerReconfiguration(ctx)
+		// 4. Check if this generation is now oversubscribed (more workers than partitions)
+		shouldReconfig, err := o.coordinator.ShouldTriggerReconfigurationForGeneration(ctx, generation.ID)
 		if err != nil {
 			return fmt.Errorf("failed to check reconfiguration: %w", err)
 		}

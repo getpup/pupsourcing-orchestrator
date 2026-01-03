@@ -134,6 +134,48 @@ func (c *Coordinator) ShouldTriggerReconfiguration(ctx context.Context) (bool, e
 	return false, nil
 }
 
+// ShouldTriggerReconfigurationForGeneration checks if reconfiguration is needed for a specific generation.
+// Returns true if the number of non-stopped, non-stale workers in the generation exceeds its TotalPartitions.
+// This is used after a worker registers to determine if the generation is now oversubscribed.
+func (c *Coordinator) ShouldTriggerReconfigurationForGeneration(ctx context.Context, generationID string) (bool, error) {
+	// Get the generation to know its TotalPartitions
+	gen, err := c.config.Store.GetActiveGeneration(ctx, c.replicaSet)
+	if err != nil {
+		return false, fmt.Errorf("failed to get active generation: %w", err)
+	}
+
+	// Only check if this is the generation we're interested in
+	if gen.ID != generationID {
+		return false, nil
+	}
+
+	// Count workers in this generation
+	workerCount, err := c.CountExpectedWorkers(ctx, generationID)
+	if err != nil {
+		return false, fmt.Errorf("failed to count workers: %w", err)
+	}
+
+	// Trigger reconfiguration if we have more workers than partitions
+	if workerCount > gen.TotalPartitions {
+		return true, nil
+	}
+
+	// Also check for stale workers
+	workers, err := c.config.Store.GetWorkersByGeneration(ctx, generationID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get workers: %w", err)
+	}
+
+	now := time.Now()
+	for _, w := range workers {
+		if w.State != orchestrator.WorkerStateStopped && now.Sub(w.LastHeartbeat) > c.config.StaleWorkerTimeout {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 // TriggerReconfiguration creates a new generation with the correct number of partitions.
 // It counts active (non-stale) workers + pending workers to determine partition count.
 // Returns the new generation.
