@@ -9,6 +9,19 @@ spec:
     name: projection-worker
   minReplicas: 2
   maxReplicas: 10
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 300  # Wait 5 minutes before scaling up
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 600  # Wait 10 minutes before scaling down
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 180
   metrics:
   - type: Resource
     resource:

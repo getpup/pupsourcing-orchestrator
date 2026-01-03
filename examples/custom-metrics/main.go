@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/prometheus/client_golang/prometheus"
@@ -88,8 +89,11 @@ func main() {
 	})
 
 	server := &http.Server{
-		Addr:    ":8080",
-		Handler: mux,
+		Addr:         ":8080",
+		Handler:      mux,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	go func() {
