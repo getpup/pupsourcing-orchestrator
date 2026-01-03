@@ -169,6 +169,73 @@ func (c *Coordinator) TriggerReconfiguration(ctx context.Context) (orchestrator.
 	return newGen, nil
 }
 
+// WaitForExpectedWorkers waits until the expected number of workers have registered for the given generation.
+// The expected count is the generation's TotalPartitions.
+// Returns nil when the expected workers have registered.
+// Returns nil if the timeout is exceeded (graceful degradation - proceed with available workers).
+func (c *Coordinator) WaitForExpectedWorkers(ctx context.Context, generationID string) error {
+	// Get active generation to determine expected worker count
+	gen, err := c.config.Store.GetActiveGeneration(ctx, c.replicaSet)
+	if err != nil {
+		return err
+	}
+
+	expectedWorkers := gen.TotalPartitions
+	ticker := time.NewTicker(c.config.PollInterval)
+	defer ticker.Stop()
+
+	startTime := time.Now()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			workers, err := c.config.Store.GetWorkersByGeneration(ctx, generationID)
+			if err != nil {
+				return err
+			}
+
+			// Count non-stopped workers
+			activeCount := 0
+			now := time.Now()
+			for _, w := range workers {
+				// Skip stopped workers
+				if w.State == orchestrator.WorkerStateStopped {
+					continue
+				}
+				// Skip stale workers
+				if now.Sub(w.LastHeartbeat) > c.config.StaleWorkerTimeout {
+					continue
+				}
+				activeCount++
+			}
+
+			if activeCount >= expectedWorkers {
+				if c.config.Logger != nil {
+					c.config.Logger.Info(ctx, "expected workers have registered",
+						"generationID", generationID,
+						"expectedWorkers", expectedWorkers,
+						"activeCount", activeCount)
+				}
+				return nil
+			}
+
+			// Check timeout
+			if time.Since(startTime) > c.config.CoordinationTimeout {
+				// Graceful degradation - proceed with available workers
+				if c.config.Logger != nil {
+					c.config.Logger.Info(ctx, "timeout waiting for expected workers, proceeding with available workers",
+						"generationID", generationID,
+						"expectedWorkers", expectedWorkers,
+						"activeCount", activeCount)
+				}
+				return nil
+			}
+		}
+	}
+}
+
 // WaitForPartitionAssignment polls the store until the worker has a partition assignment.
 // Returns the partition assignment once PartitionKey >= 0.
 // Returns ErrCoordinationTimeout if the timeout is exceeded.

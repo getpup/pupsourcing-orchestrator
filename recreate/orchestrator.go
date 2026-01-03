@@ -162,67 +162,71 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 			heartbeatDone <- o.lifecycle.StartHeartbeat(heartbeatCtx)
 		}()
 
-		// 4.5. Wait for other workers to register, then try to assign partitions if we are the leader
-		// This wait allows multiple workers starting simultaneously to all register before partition assignment
-		waitTimer := time.NewTimer(o.config.RegistrationWaitTime)
-		defer waitTimer.Stop()
-		select {
-		case <-waitTimer.C:
-			// Wait completed normally
-		case <-ctx.Done():
-			cancelHeartbeat()
-			return ctx.Err()
-		}
-
-		// Try to assign partitions (only leader will actually assign)
-		_, err = o.coordinator.AssignPartitionsIfLeader(ctx, generation.ID, workerID)
+		// 5. Check if this worker is the leader
+		isLeader, err := o.coordinator.IsLeader(ctx, generation.ID, workerID)
 		if err != nil {
 			cancelHeartbeat()
-			return fmt.Errorf("failed to assign partitions: %w", err)
+			return fmt.Errorf("failed to check leader status: %w", err)
 		}
 
-		// 5. Wait for partition assignment
+		// 6. If leader, wait for expected workers then assign partitions
+		if isLeader {
+			// Wait for expected number of workers to register
+			if err := o.coordinator.WaitForExpectedWorkers(ctx, generation.ID); err != nil {
+				cancelHeartbeat()
+				return fmt.Errorf("failed waiting for expected workers: %w", err)
+			}
+
+			// Assign partitions
+			_, err = o.coordinator.AssignPartitionsIfLeader(ctx, generation.ID, workerID)
+			if err != nil {
+				cancelHeartbeat()
+				return fmt.Errorf("failed to assign partitions: %w", err)
+			}
+		}
+
+		// 7. Wait for partition assignment
 		assignment, err := o.coordinator.WaitForPartitionAssignment(ctx, workerID)
 		if err != nil {
 			cancelHeartbeat()
 			return fmt.Errorf("failed to get partition assignment: %w", err)
 		}
 
-		// 6. Mark self as ready
+		// 8. Mark self as ready
 		if err := o.lifecycle.UpdateState(ctx, orchestrator.WorkerStateReady); err != nil {
 			cancelHeartbeat()
 			return fmt.Errorf("failed to update state to ready: %w", err)
 		}
 
-		// 7. Wait for all workers to be ready
+		// 9. Wait for all workers to be ready
 		err = o.coordinator.WaitForAllReady(ctx, generation.ID)
 		if err != nil {
 			cancelHeartbeat()
 			return fmt.Errorf("coordination failed: %w", err)
 		}
 
-		// 8. Mark self as running
+		// 10. Mark self as running
 		if err := o.lifecycle.UpdateState(ctx, orchestrator.WorkerStateRunning); err != nil {
 			cancelHeartbeat()
 			return fmt.Errorf("failed to update state to running: %w", err)
 		}
 
-		// 9. Create execution context that can be cancelled on generation change
+		// 11. Create execution context that can be cancelled on generation change
 		execCtx, cancelExec := context.WithCancel(ctx)
 
-		// 10. Watch for generation changes in background
+		// 12. Watch for generation changes in background
 		watchDone := make(chan error, 1)
 		go func() {
 			watchDone <- o.coordinator.WatchGeneration(execCtx, generation.ID)
 		}()
 
-		// 11. Run projections
+		// 13. Run projections
 		execDone := make(chan error, 1)
 		go func() {
 			execDone <- o.executor.Run(execCtx, projections, assignment)
 		}()
 
-		// 12. Wait for either execution to complete or generation to change
+		// 14. Wait for either execution to complete or generation to change
 		var runErr error
 		select {
 		case runErr = <-execDone:
@@ -253,7 +257,7 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 			return ctx.Err()
 		}
 
-		// 13. Cleanup
+		// 15. Cleanup
 		cancelHeartbeat()
 		if err := o.lifecycle.UpdateState(ctx, orchestrator.WorkerStateStopped); err != nil {
 			if o.config.Logger != nil {
@@ -261,12 +265,12 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 			}
 		}
 
-		// 14. If parent context cancelled, exit
+		// 16. If parent context cancelled, exit
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		// 15. If execution error (not from context cancellation), return it
+		// 17. If execution error (not from context cancellation), return it
 		if runErr != nil && !errors.Is(runErr, context.Canceled) {
 			return runErr
 		}
