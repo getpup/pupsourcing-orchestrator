@@ -366,3 +366,37 @@ func (c *Coordinator) AssignPartitionsIfLeader(ctx context.Context, generationID
 
 	return true, nil
 }
+
+// JoinOrCreate coordinates a worker joining or creating a generation.
+// It handles the full coordination flow:
+// 1. Get or create the current generation
+// 2. Check if reconfiguration is needed (new/stale workers)
+// 3. If reconfiguration needed, trigger it
+// 4. Return the active generation
+//
+// This method is designed to be called by workers at startup or after
+// a generation supersession event.
+func (c *Coordinator) JoinOrCreate(ctx context.Context) (orchestrator.Generation, error) {
+	// Get or create the current generation
+	gen, err := c.GetOrCreateGeneration(ctx)
+	if err != nil {
+		return orchestrator.Generation{}, fmt.Errorf("failed to get or create generation: %w", err)
+	}
+
+	// Check if reconfiguration is needed
+	shouldReconfig, err := c.ShouldTriggerReconfiguration(ctx)
+	if err != nil {
+		return orchestrator.Generation{}, fmt.Errorf("failed to check reconfiguration: %w", err)
+	}
+
+	if shouldReconfig {
+		// Trigger reconfiguration - this creates a new generation
+		newGen, err := c.TriggerReconfiguration(ctx)
+		if err != nil {
+			return orchestrator.Generation{}, fmt.Errorf("failed to trigger reconfiguration: %w", err)
+		}
+		return newGen, nil
+	}
+
+	return gen, nil
+}
