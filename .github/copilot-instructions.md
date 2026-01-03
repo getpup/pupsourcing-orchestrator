@@ -21,16 +21,33 @@ proceeding with work on the orchestrator tasks.
 
 ### Test Structure and Organization
 
-- **Use `t.Run` for named test cases** - Group related test scenarios with descriptive names
+- **Use `t.Run` for named test cases** - Only when testing multiple related scenarios in a single test function
   ```go
+  func TestUserPermissions(t *testing.T) {
+      t.Run("admin user has admin permission", func(t *testing.T) {
+          user := User{Role: "admin"}
+          assert.True(t, user.HasPermission("admin"))
+      })
+      
+      t.Run("regular user lacks admin permission", func(t *testing.T) {
+          user := User{Role: "user"}
+          assert.False(t, user.HasPermission("admin"))
+      })
+  }
+  ```
+
+- **Do not use `t.Run` for single test cases** - If a test function has only one scenario, write it directly without wrapping in `t.Run`
+  ```go
+  // ❌ Bad: Unnecessary t.Run wrapper for single test case
   func TestUserCreation(t *testing.T) {
       t.Run("creates user successfully", func(t *testing.T) {
           // test implementation
       })
-      
-      t.Run("returns error when email is invalid", func(t *testing.T) {
-          // test implementation
-      })
+  }
+  
+  // ✅ Good: Direct test implementation for single test case
+  func TestUserCreation(t *testing.T) {
+      // test implementation
   }
   ```
 
