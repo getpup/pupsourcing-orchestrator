@@ -20,6 +20,7 @@ make test-integration
 Or directly with go test:
 ```bash
 go test -v -tags=integration ./integration_test/...
+go test -v -tags=integration ./store/postgres/integration_test/...
 ```
 
 ## CI
