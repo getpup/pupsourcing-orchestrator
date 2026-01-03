@@ -316,3 +316,53 @@ func (c *Coordinator) CleanupStaleWorkers(ctx context.Context) error {
 
 	return nil
 }
+
+// IsLeader checks if the given worker is the leader for partition assignment.
+// The leader is the worker with the lexicographically smallest ID in the generation.
+// Leaders are responsible for calling AssignPartitions.
+func (c *Coordinator) IsLeader(ctx context.Context, generationID string, workerID string) (bool, error) {
+	workers, err := c.config.Store.GetWorkersByGeneration(ctx, generationID)
+	if err != nil {
+		return false, err
+	}
+
+	if len(workers) == 0 {
+		return false, nil
+	}
+
+	// Find the worker with smallest ID
+	leaderID := workers[0].ID
+	for _, w := range workers[1:] {
+		if w.ID < leaderID {
+			leaderID = w.ID
+		}
+	}
+
+	return workerID == leaderID, nil
+}
+
+// AssignPartitionsIfLeader assigns partitions only if this worker is the leader.
+// Returns true if this worker performed the assignment, false otherwise.
+func (c *Coordinator) AssignPartitionsIfLeader(ctx context.Context, generationID string, workerID string) (bool, error) {
+	isLeader, err := c.IsLeader(ctx, generationID, workerID)
+	if err != nil {
+		return false, err
+	}
+
+	if !isLeader {
+		return false, nil
+	}
+
+	assigner := NewAssigner(c.config.Store)
+	if err := assigner.AssignPartitions(ctx, generationID); err != nil {
+		return false, err
+	}
+
+	if c.config.Logger != nil {
+		c.config.Logger.Info(ctx, "leader assigned partitions",
+			"workerID", workerID,
+			"generationID", generationID)
+	}
+
+	return true, nil
+}
