@@ -107,16 +107,16 @@ The examples will automatically run migrations on startup.
 All examples follow a similar configuration pattern:
 
 ```go
-orch, err := orchestrator.New(orchestrator.Config{
-    DB:                  db,              // Required: PostgreSQL connection
-    EventStore:          eventStore,      // Required: Event store
-    ReplicaSet:          "my-replica",    // Required: Replica set name
-    HeartbeatInterval:   5 * time.Second, // Optional: Default 5s
-    StaleWorkerTimeout:  30 * time.Second, // Optional: Default 30s
-    CoordinationTimeout: 60 * time.Second, // Optional: Default 60s
-    BatchSize:           100,              // Optional: Default 100
-    Logger:              logger,           // Optional: For observability
-})
+orch, err := orchestrator.New(
+    db,              // Required: PostgreSQL connection
+    eventStore,      // Required: Event store
+    "my-replica",    // Required: Replica set name
+    orchestrator.WithHeartbeatInterval(5 * time.Second), // Optional: Default 5s
+    orchestrator.WithStaleWorkerTimeout(30 * time.Second), // Optional: Default 30s
+    orchestrator.WithCoordinationTimeout(60 * time.Second), // Optional: Default 60s
+    orchestrator.WithBatchSize(100),            // Optional: Default 100
+    orchestrator.WithLogger(logger),            // Optional: For observability
+)
 ```
 
 ### Graceful Shutdown

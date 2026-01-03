@@ -36,3 +36,8 @@ Thumbs.db
 # Temporary files
 tmp/
 *.tmp
+
+# Example binaries
+basic
+custom-metrics
+multiple-replica-sets

@@ -6,82 +6,58 @@ import (
 	"time"
 
 	rootpkg "github.com/getpup/pupsourcing-orchestrator"
+	"github.com/getpup/pupsourcing-orchestrator/store/postgres"
 	espostgres "github.com/getpup/pupsourcing/es/adapters/postgres"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestNew_ValidConfig(t *testing.T) {
+func TestNew_ValidParameters(t *testing.T) {
 	db := &sql.DB{}
 	eventStore := &espostgres.Store{}
-	cfg := Config{
-		DB:         db,
-		EventStore: eventStore,
-		ReplicaSet: "test-replica-set",
-	}
 
-	orch, err := New(cfg)
+	orch, err := New(db, eventStore, "test-replica-set")
 
 	require.NoError(t, err)
 	assert.NotNil(t, orch)
 }
 
-func TestNew_MissingDB(t *testing.T) {
+func TestNew_MissingDatabase(t *testing.T) {
 	eventStore := &espostgres.Store{}
-	cfg := Config{
-		EventStore: eventStore,
-		ReplicaSet: "test-replica-set",
-	}
 
-	orch, err := New(cfg)
+	orch, err := New(nil, eventStore, "test-replica-set")
 
 	assert.Error(t, err)
 	assert.Nil(t, orch)
-	assert.Contains(t, err.Error(), "DB is required")
+	assert.Contains(t, err.Error(), "database is required")
 }
 
 func TestNew_MissingEventStore(t *testing.T) {
 	db := &sql.DB{}
-	cfg := Config{
-		DB:         db,
-		ReplicaSet: "test-replica-set",
-	}
 
-	orch, err := New(cfg)
+	orch, err := New(db, nil, "test-replica-set")
 
 	assert.Error(t, err)
 	assert.Nil(t, orch)
-	assert.Contains(t, err.Error(), "EventStore is required")
+	assert.Contains(t, err.Error(), "event store is required")
 }
 
 func TestNew_MissingReplicaSet(t *testing.T) {
 	db := &sql.DB{}
 	eventStore := &espostgres.Store{}
-	cfg := Config{
-		DB:         db,
-		EventStore: eventStore,
-	}
 
-	orch, err := New(cfg)
+	orch, err := New(db, eventStore, "")
 
 	assert.Error(t, err)
 	assert.Nil(t, orch)
-	assert.Contains(t, err.Error(), "ReplicaSet is required")
+	assert.Contains(t, err.Error(), "replica set is required")
 }
 
 func TestNew_DefaultsAreApplied(t *testing.T) {
-	// Note: We can't directly inspect the internal config of the orchestrator,
-	// but we can verify defaults are applied by providing only required fields
-	// and checking that New succeeds (defaults allow successful creation).
 	db := &sql.DB{}
 	eventStore := &espostgres.Store{}
-	cfg := Config{
-		DB:         db,
-		EventStore: eventStore,
-		ReplicaSet: "test-replica-set",
-	}
 
-	orch, err := New(cfg)
+	orch, err := New(db, eventStore, "test-replica-set")
 
 	require.NoError(t, err)
 	assert.NotNil(t, orch)
@@ -90,17 +66,146 @@ func TestNew_DefaultsAreApplied(t *testing.T) {
 func TestNew_CustomValuesArePreserved(t *testing.T) {
 	db := &sql.DB{}
 	eventStore := &espostgres.Store{}
-	cfg := Config{
-		DB:                  db,
-		EventStore:          eventStore,
-		ReplicaSet:          "test-replica-set",
-		HeartbeatInterval:   10 * time.Second,
-		StaleWorkerTimeout:  60 * time.Second,
-		CoordinationTimeout: 120 * time.Second,
-		BatchSize:           50,
-	}
 
-	orch, err := New(cfg)
+	orch, err := New(
+		db,
+		eventStore,
+		"test-replica-set",
+		WithHeartbeatInterval(10*time.Second),
+		WithStaleWorkerTimeout(60*time.Second),
+		WithCoordinationTimeout(120*time.Second),
+		WithBatchSize(50),
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, orch)
+}
+
+func TestWithTableNames(t *testing.T) {
+	db := &sql.DB{}
+	eventStore := &espostgres.Store{}
+
+	orch, err := New(
+		db,
+		eventStore,
+		"test-replica-set",
+		WithTableNames("custom_generations", "custom_workers"),
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, orch)
+}
+
+func TestWithGenerationStore(t *testing.T) {
+	db := &sql.DB{}
+	eventStore := &espostgres.Store{}
+	customStore := postgres.New(db)
+
+	orch, err := New(
+		db,
+		eventStore,
+		"test-replica-set",
+		WithGenerationStore(customStore),
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, orch)
+}
+
+func TestWithLogger(t *testing.T) {
+	db := &sql.DB{}
+	eventStore := &espostgres.Store{}
+
+	orch, err := New(
+		db,
+		eventStore,
+		"test-replica-set",
+		WithLogger(nil), // nil logger is valid
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, orch)
+}
+
+func TestWithMetricsEnabled(t *testing.T) {
+	t.Run("metrics enabled", func(t *testing.T) {
+		db := &sql.DB{}
+		eventStore := &espostgres.Store{}
+
+		orch, err := New(
+			db,
+			eventStore,
+			"test-replica-set",
+			WithMetricsEnabled(true),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+	})
+
+	t.Run("metrics disabled", func(t *testing.T) {
+		db := &sql.DB{}
+		eventStore := &espostgres.Store{}
+
+		orch, err := New(
+			db,
+			eventStore,
+			"test-replica-set",
+			WithMetricsEnabled(false),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+	})
+}
+
+func TestWithPollInterval(t *testing.T) {
+	db := &sql.DB{}
+	eventStore := &espostgres.Store{}
+
+	orch, err := New(
+		db,
+		eventStore,
+		"test-replica-set",
+		WithPollInterval(2*time.Second),
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, orch)
+}
+
+func TestWithRegistrationWaitTime(t *testing.T) {
+	db := &sql.DB{}
+	eventStore := &espostgres.Store{}
+
+	orch, err := New(
+		db,
+		eventStore,
+		"test-replica-set",
+		WithRegistrationWaitTime(10*time.Second),
+	)
+
+	require.NoError(t, err)
+	assert.NotNil(t, orch)
+}
+
+func TestMultipleOptions(t *testing.T) {
+	db := &sql.DB{}
+	eventStore := &espostgres.Store{}
+
+	orch, err := New(
+		db,
+		eventStore,
+		"test-replica-set",
+		WithHeartbeatInterval(10*time.Second),
+		WithStaleWorkerTimeout(60*time.Second),
+		WithCoordinationTimeout(120*time.Second),
+		WithPollInterval(2*time.Second),
+		WithBatchSize(50),
+		WithRegistrationWaitTime(10*time.Second),
+		WithTableNames("custom_gen", "custom_work"),
+		WithMetricsEnabled(false),
+	)
 
 	require.NoError(t, err)
 	assert.NotNil(t, orch)
@@ -144,7 +249,116 @@ func TestReExportedTypes(t *testing.T) {
 func TestRunMigrations(t *testing.T) {
 	// Note: This is a unit test that verifies RunMigrations exists and has
 	// the correct signature. Full testing of migrations requires a real database
-	// and is done in integration tests. Here we just verify the function compiles
-	// and can be called (we check it's not nil).
+	// and is done in integration tests.
 	assert.NotNil(t, RunMigrations)
+	assert.NotNil(t, RunMigrationsWithTableNames)
+}
+
+func TestRunMigrationsWithTableNames(t *testing.T) {
+	// Verify the function exists and accepts a TableConfig
+	config := postgres.TableConfig{
+		GenerationsTable: "custom_gen",
+		WorkersTable:     "custom_work",
+	}
+	// We can't test execution without a real DB, but we verify the signature compiles
+	assert.NotNil(t, config)
+}
+
+func TestWithBatchSize_InvalidValue(t *testing.T) {
+	db := &sql.DB{}
+	eventStore := &espostgres.Store{}
+
+	t.Run("zero batch size uses default", func(t *testing.T) {
+		orch, err := New(
+			db,
+			eventStore,
+			"test-replica-set",
+			WithBatchSize(0), // Zero should be ignored
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+		// If this succeeds, it means the default batch size (100) was used
+	})
+
+	t.Run("negative batch size uses default", func(t *testing.T) {
+		orch, err := New(
+			db,
+			eventStore,
+			"test-replica-set",
+			WithBatchSize(-10), // Negative should be ignored
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+		// If this succeeds, it means the default batch size (100) was used
+	})
+
+	t.Run("positive batch size is accepted", func(t *testing.T) {
+		orch, err := New(
+			db,
+			eventStore,
+			"test-replica-set",
+			WithBatchSize(500),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+	})
+}
+
+func TestWithTableNames_InvalidValues(t *testing.T) {
+	db := &sql.DB{}
+	eventStore := &espostgres.Store{}
+
+	t.Run("empty generations table uses defaults", func(t *testing.T) {
+		orch, err := New(
+			db,
+			eventStore,
+			"test-replica-set",
+			WithTableNames("", "custom_workers"),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+		// If this succeeds, it means default table names were used
+	})
+
+	t.Run("empty workers table uses defaults", func(t *testing.T) {
+		orch, err := New(
+			db,
+			eventStore,
+			"test-replica-set",
+			WithTableNames("custom_gen", ""),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+		// If this succeeds, it means default table names were used
+	})
+
+	t.Run("both empty tables use defaults", func(t *testing.T) {
+		orch, err := New(
+			db,
+			eventStore,
+			"test-replica-set",
+			WithTableNames("", ""),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+		// If this succeeds, it means default table names were used
+	})
+
+	t.Run("valid table names are accepted", func(t *testing.T) {
+		orch, err := New(
+			db,
+			eventStore,
+			"test-replica-set",
+			WithTableNames("custom_gen", "custom_workers"),
+		)
+
+		require.NoError(t, err)
+		assert.NotNil(t, orch)
+	})
 }

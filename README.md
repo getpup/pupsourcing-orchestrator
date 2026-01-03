@@ -75,11 +75,7 @@ func main() {
 	eventStore := postgres.NewStore(postgres.DefaultStoreConfig())
 
 	// Create orchestrator
-	orch, err := orchestrator.New(orchestrator.Config{
-		DB:         db,
-		EventStore: eventStore,
-		ReplicaSet: "main-projections",
-	})
+	orch, err := orchestrator.New(db, eventStore, "main-projections")
 	if err != nil {
 		log.Fatalf("Failed to create orchestrator: %v", err)
 	}
@@ -165,48 +161,96 @@ This approach ensures:
 
 ## Configuration
 
-The `orchestrator.Config` struct supports the following fields:
+The orchestrator is configured by passing required parameters and optional configuration to `orchestrator.New()`.
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `DB` | `*sql.DB` | Yes | - | Database connection for generation state and processors |
-| `EventStore` | `*postgres.Store` | Yes | - | Event store for reading events |
-| `ReplicaSet` | `ReplicaSetName` | Yes | - | Name of the replica set this orchestrator manages |
-| `HeartbeatInterval` | `time.Duration` | No | `5s` | Interval between heartbeats |
-| `StaleWorkerTimeout` | `time.Duration` | No | `30s` | Duration after which a worker is considered dead |
-| `CoordinationTimeout` | `time.Duration` | No | `60s` | Max time to wait for coordination |
-| `BatchSize` | `int` | No | `100` | Number of events to read per batch |
-| `Logger` | `es.Logger` | No | `nil` | Logger for observability |
+### Required Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `db` | `*sql.DB` | Database connection for generation state and processors |
+| `eventStore` | `*postgres.Store` | Event store for reading events |
+| `replicaSet` | `ReplicaSetName` | Name of the replica set this orchestrator manages |
+
+### Optional Configuration (with defaults)
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithHeartbeatInterval(interval)` | `5s` | Interval between heartbeats |
+| `WithStaleWorkerTimeout(timeout)` | `30s` | Duration after which a worker is considered dead |
+| `WithCoordinationTimeout(timeout)` | `60s` | Max time to wait for coordination |
+| `WithPollInterval(interval)` | `1s` | How often to check state during coordination |
+| `WithBatchSize(size)` | `100` | Number of events to read per batch |
+| `WithRegistrationWaitTime(duration)` | `5s` | Time to wait for workers to register before assigning partitions |
+| `WithLogger(logger)` | `nil` | Logger for observability |
+| `WithMetricsEnabled(enabled)` | `true` | Enable Prometheus metrics |
+| `WithTableNames(genTable, workersTable)` | See below | Custom table names for generation store |
+| `WithGenerationStore(store)` | PostgreSQL | Custom generation store implementation |
+| `WithExecutor(executor)` | Default | Custom executor for running projections |
+
+### Custom Table Names
+
+By default, the orchestrator uses these table names:
+- `orchestrator_generations` for generation metadata
+- `orchestrator_workers` for worker metadata
+
+You can customize these names:
+
+```go
+orch, err := orchestrator.New(
+    db,
+    eventStore,
+    "main-projections",
+    orchestrator.WithTableNames("my_generations", "my_workers"),
+)
+```
+
+When using custom table names, you must also use them for migrations:
+
+```go
+tableConfig := postgres.TableConfig{
+    GenerationsTable: "my_generations",
+    WorkersTable:     "my_workers",
+}
+if err := orchestrator.RunMigrationsWithTableNames(db, tableConfig); err != nil {
+    log.Fatal(err)
+}
+```
 
 ### Tuning for Different Scenarios
 
 **High-Throughput Systems** (processing many events per second):
 ```go
-orchestrator.Config{
-	// ... required fields ...
-	BatchSize:           1000,  // Larger batches for efficiency
-	HeartbeatInterval:   3 * time.Second,
-	StaleWorkerTimeout:  15 * time.Second,
-}
+orch, err := orchestrator.New(
+	db,
+	eventStore,
+	"main-projections",
+	orchestrator.WithBatchSize(1000),  // Larger batches for efficiency
+	orchestrator.WithHeartbeatInterval(3 * time.Second),
+	orchestrator.WithStaleWorkerTimeout(15 * time.Second),
+)
 ```
 
 **Low-Latency Systems** (minimizing detection time for worker failures):
 ```go
-orchestrator.Config{
-	// ... required fields ...
-	HeartbeatInterval:   2 * time.Second,
-	StaleWorkerTimeout:  10 * time.Second,
-}
+orch, err := orchestrator.New(
+	db,
+	eventStore,
+	"main-projections",
+	orchestrator.WithHeartbeatInterval(2 * time.Second),
+	orchestrator.WithStaleWorkerTimeout(10 * time.Second),
+)
 ```
 
 **Stable Production Systems** (fewer workers, less churn):
 ```go
-orchestrator.Config{
-	// ... required fields ...
-	HeartbeatInterval:   10 * time.Second,
-	StaleWorkerTimeout:  60 * time.Second,
-	CoordinationTimeout: 120 * time.Second,
-}
+orch, err := orchestrator.New(
+	db,
+	eventStore,
+	"main-projections",
+	orchestrator.WithHeartbeatInterval(10 * time.Second),
+	orchestrator.WithStaleWorkerTimeout(60 * time.Second),
+	orchestrator.WithCoordinationTimeout(120 * time.Second),
+)
 ```
 
 ## Multiple Replica Sets
@@ -215,17 +259,9 @@ You can run multiple independent replica sets in the same application. Each repl
 
 ```go
 // Create orchestrators for different replica sets
-mainOrch, _ := orchestrator.New(orchestrator.Config{
-	DB:         db,
-	EventStore: eventStore,
-	ReplicaSet: "main-projections",
-})
+mainOrch, _ := orchestrator.New(db, eventStore, "main-projections")
 
-analyticsOrch, _ := orchestrator.New(orchestrator.Config{
-	DB:         db,
-	EventStore: eventStore,
-	ReplicaSet: "analytics-projections",
-})
+analyticsOrch, _ := orchestrator.New(db, eventStore, "analytics-projections")
 
 // Run them concurrently
 var wg sync.WaitGroup
@@ -399,10 +435,12 @@ func (l *myLogger) Error(ctx context.Context, msg string, keysAndValues ...inter
 	// Your logging implementation
 }
 
-orch, _ := orchestrator.New(orchestrator.Config{
-	// ... other fields ...
-	Logger: &myLogger{},
-})
+orch, _ := orchestrator.New(
+	db,
+	eventStore,
+	"main-projections",
+	orchestrator.WithLogger(&myLogger{}),
+)
 ```
 
 ### Kubernetes Deployment
@@ -514,11 +552,7 @@ processor.Run(ctx)
 
 ```go
 // New approach: orchestrator handles everything
-orch, _ := orchestrator.New(orchestrator.Config{
-	DB:         db,
-	EventStore: eventStore,
-	ReplicaSet: "main-projections",
-})
+orch, _ := orchestrator.New(db, eventStore, "main-projections")
 
 projections := []projection.Projection{
 	&UserProjection{},
