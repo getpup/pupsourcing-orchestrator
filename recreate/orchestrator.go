@@ -46,6 +46,10 @@ type Config struct {
 	// BatchSize is the number of events to read per batch (default: 100).
 	BatchSize int
 
+	// RegistrationWaitTime is how long to wait for other workers to register
+	// before the leader assigns partitions (default: 5s).
+	RegistrationWaitTime time.Duration
+
 	// Logger is for observability (optional).
 	Logger es.Logger
 }
@@ -76,6 +80,9 @@ func New(cfg Config) *Orchestrator {
 	}
 	if cfg.BatchSize == 0 {
 		cfg.BatchSize = 100
+	}
+	if cfg.RegistrationWaitTime == 0 {
+		cfg.RegistrationWaitTime = 5 * time.Second
 	}
 
 	// Create lifecycle manager
@@ -145,6 +152,17 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 		go func() {
 			heartbeatDone <- o.lifecycle.StartHeartbeat(heartbeatCtx)
 		}()
+
+		// 4.5. Wait for other workers to register, then try to assign partitions if we are the leader
+		// This wait allows multiple workers starting simultaneously to all register before partition assignment
+		time.Sleep(o.config.RegistrationWaitTime)
+
+		// Try to assign partitions (only leader will actually assign)
+		_, err = o.coordinator.AssignPartitionsIfLeader(ctx, generation.ID, workerID)
+		if err != nil {
+			cancelHeartbeat()
+			return fmt.Errorf("failed to assign partitions: %w", err)
+		}
 
 		// 5. Wait for partition assignment
 		assignment, err := o.coordinator.WaitForPartitionAssignment(ctx, workerID)
