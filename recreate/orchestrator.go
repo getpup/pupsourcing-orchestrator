@@ -156,11 +156,11 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 		// 4.5. Wait for other workers to register, then try to assign partitions if we are the leader
 		// This wait allows multiple workers starting simultaneously to all register before partition assignment
 		waitTimer := time.NewTimer(o.config.RegistrationWaitTime)
+		defer waitTimer.Stop()
 		select {
 		case <-waitTimer.C:
 			// Wait completed normally
 		case <-ctx.Done():
-			waitTimer.Stop()
 			cancelHeartbeat()
 			return ctx.Err()
 		}
