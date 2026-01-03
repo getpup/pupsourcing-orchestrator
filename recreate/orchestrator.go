@@ -11,6 +11,7 @@ import (
 	"github.com/getpup/pupsourcing-orchestrator/coordinator"
 	"github.com/getpup/pupsourcing-orchestrator/executor"
 	"github.com/getpup/pupsourcing-orchestrator/lifecycle"
+	"github.com/getpup/pupsourcing-orchestrator/metrics"
 	"github.com/getpup/pupsourcing-orchestrator/store"
 	"github.com/getpup/pupsourcing/es"
 	"github.com/getpup/pupsourcing/es/adapters/postgres"
@@ -56,6 +57,10 @@ type Config struct {
 
 	// Logger is for observability (optional).
 	Logger es.Logger
+
+	// MetricsEnabled enables Prometheus metrics collection (default: true).
+	// Set to false explicitly to disable metrics.
+	MetricsEnabled *bool
 }
 
 // Orchestrator coordinates the execution of projections across multiple workers.
@@ -64,6 +69,7 @@ type Orchestrator struct {
 	lifecycle   *lifecycle.Manager
 	coordinator *coordinator.Coordinator
 	executor    executor.Runner
+	collector   *metrics.Collector
 }
 
 // New creates a new Orchestrator with the given configuration.
@@ -87,6 +93,16 @@ func New(cfg Config) *Orchestrator {
 	}
 	if cfg.RegistrationWaitTime == 0 {
 		cfg.RegistrationWaitTime = 5 * time.Second
+	}
+
+	// Create metrics collector if enabled (default: true)
+	var collector *metrics.Collector
+	metricsEnabled := true
+	if cfg.MetricsEnabled != nil {
+		metricsEnabled = *cfg.MetricsEnabled
+	}
+	if metricsEnabled {
+		collector = metrics.NewCollector(string(cfg.ReplicaSet))
 	}
 
 	// Create lifecycle manager
@@ -123,6 +139,7 @@ func New(cfg Config) *Orchestrator {
 		lifecycle:   lifecycleManager,
 		coordinator: coord,
 		executor:    exec,
+		collector:   collector,
 	}
 }
 
@@ -154,6 +171,9 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 		if err != nil {
 			return fmt.Errorf("failed to register worker: %w", err)
 		}
+		if o.collector != nil {
+			o.collector.IncWorkersRegistered()
+		}
 
 		// 4. Start heartbeat in background
 		heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
@@ -183,6 +203,9 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 				cancelHeartbeat()
 				return fmt.Errorf("failed to assign partitions: %w", err)
 			}
+			if o.collector != nil {
+				o.collector.IncPartitionAssignments()
+			}
 		}
 
 		// 7. Wait for partition assignment
@@ -198,11 +221,20 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 			return fmt.Errorf("failed to update state to ready: %w", err)
 		}
 
+		// Track start of coordination
+		coordinationStart := time.Now()
+
 		// 9. Wait for all workers to be ready
 		err = o.coordinator.WaitForAllReady(ctx, generation.ID)
 		if err != nil {
 			cancelHeartbeat()
 			return fmt.Errorf("coordination failed: %w", err)
+		}
+
+		// Track coordination duration
+		if o.collector != nil {
+			o.collector.ObserveCoordinationDuration(time.Since(coordinationStart).Seconds())
+			o.collector.SetCurrentGenerationPartitions(generation.TotalPartitions)
 		}
 
 		// 10. Mark self as running
@@ -236,6 +268,10 @@ func (o *Orchestrator) Run(ctx context.Context, projections []projection.Project
 			// Generation changed
 			cancelExec()
 			if errors.Is(watchErr, orchestrator.ErrGenerationSuperseded) {
+				// Track reconfiguration
+				if o.collector != nil {
+					o.collector.IncReconfiguration()
+				}
 				// Log and continue to next iteration
 				if o.config.Logger != nil {
 					o.config.Logger.Info(ctx, "generation superseded, reconfiguring",
