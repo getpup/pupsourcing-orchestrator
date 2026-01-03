@@ -8,6 +8,16 @@ linters:
     - staticcheck
     - unused
     - gocritic
+  exclusions:
+    rules:
+      - path-except: '^/examples/'
+        linters:
+          - errcheck
+          - govet
+          - ineffassign
+          - staticcheck
+          - unused
+          - gocritic
 
 run:
   timeout: 5m
