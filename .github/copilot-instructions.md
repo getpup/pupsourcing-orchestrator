@@ -5,8 +5,9 @@
 pupsourcing-orchestrator is a companion library to [pupsourcing](https://github.com/getpup/pupsourcing) responsible for 
 running, supervising, and scaling projections in an event-sourced system.
 
-All tasks should align with the DEVELOPMENT_PLAN.md document. Always read the DEVELOPMENT_PLAN.md before starting work 
-on a task to understand the scope better.
+At the moment we are running a large-scale redesign of the solution. All tasks should align with the 
+REDESIGN_OVERVIEW.md document. Always read the REDESIGN_OVERVIEW.md before starting work on a task to understand the 
+scope better. Align the task you are assigned with the overall redesign plan.
 
 Since pupsourcing-orchestrator depends on https://github.com/getpup/pupsourcing, always study the core library before
 proceeding with work on the orchestrator tasks.
