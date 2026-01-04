@@ -12,6 +12,10 @@ scope better. Align the task you are assigned with the overall redesign plan.
 Since pupsourcing-orchestrator depends on https://github.com/getpup/pupsourcing, always study the core library before
 proceeding with work on the orchestrator tasks.
 
+IMPORTANT: Backwards compatibility is NOT a concern during the redesign phase. We are free to make breaking changes
+as needed to achieve the desired architecture. If something is to be deprecated – just remove it entirely instead of 
+marking it as deprecated.
+
 ## Testing
 
 ### Test Execution and Coverage
